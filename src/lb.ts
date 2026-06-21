@@ -102,6 +102,17 @@ const server = Bun.serve({
       return mergedTrending(limit);
     }
 
+    // ---- API: GET /cache/debug?prefix=<p> --------------------------------
+    // Same consistent-hash routing as /suggest, so it reports the node that
+    // actually owns the prefix's cache (and whether it's a hit/miss there).
+    if (req.method === "GET" && pathname === "/cache/debug") {
+      const key = normalize(url.searchParams.get("prefix") ?? "");
+      if (!key) return Response.json({ error: "missing prefix" }, { status: 400 });
+      const shard = route(key);
+      logRoute("GET", pathname, key, shard);
+      return proxy(shard, `/cache/debug${url.search}`);
+    }
+
     // ---- Static frontend -------------------------------------------------
     if (req.method === "GET" && (pathname === "/" || pathname === "/index.html")) {
       return new Response(Bun.file("public/index.html"));

@@ -17,7 +17,7 @@ export const BATCH_SIZE = Number(process.env.BATCH_SIZE ?? 100);
 export const FLUSH_INTERVAL_MS = Number(process.env.FLUSH_INTERVAL_MS ?? 5000);
 
 /** Default number of autocomplete suggestions returned by GET /suggest. */
-export const SUGGEST_LIMIT = Number(process.env.SUGGEST_LIMIT ?? 5);
+export const SUGGEST_LIMIT = Number(process.env.SUGGEST_LIMIT ?? 10);
 
 /** Default number of trending queries returned by GET /trending. */
 export const TRENDING_LIMIT = Number(process.env.TRENDING_LIMIT ?? 10);

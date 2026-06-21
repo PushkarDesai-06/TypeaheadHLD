@@ -277,7 +277,7 @@ const server = Bun.serve({
       const buffered = buffer.push(query); // push returns the new length
       if (buffered >= BATCH_SIZE) void scheduleFlush(); // primary trigger (Step 4)
 
-      return json({ accepted: true, buffered }, 202);
+      return json({ message: "Searched", query, buffered }, 202);
     }
 
     // GET /trending — local shard trending (the LB fans out + merges).
@@ -290,6 +290,22 @@ const server = Bun.serve({
         "WITHSCORES",
       ]);
       return json({ shard: SHARD_ID, trending: parseScored(raw) });
+    }
+
+    // GET /cache/debug?prefix=<p> — which node owns this prefix's cache, and
+    // whether it is a cache HIT (entry present on this shard) or MISS.
+    if (req.method === "GET" && url.pathname === "/cache/debug") {
+      const prefix = normalize(url.searchParams.get("prefix") ?? "");
+      if (!prefix) return json({ error: "missing prefix" }, 400);
+
+      const cached = Number(await redis.send("ZCARD", [suggestKey(prefix)]));
+      return json({
+        prefix,
+        node: `app${SHARD_ID}`,
+        shard: SHARD_ID,
+        status: cached > 0 ? "hit" : "miss",
+        cached,
+      });
     }
 
     // POST /internal/cache — the cache-updater pushes refreshed top-K caches
