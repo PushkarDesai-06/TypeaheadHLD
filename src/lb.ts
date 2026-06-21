@@ -61,6 +61,42 @@ async function mergedTrending(limit: number): Promise<Response> {
   return Response.json({ trending: merged.slice(0, limit) });
 }
 
+/** Fan out GET /metrics to every App Node and sum the counters into a cluster view. */
+async function aggregatedMetrics(): Promise<Response> {
+  const results = await Promise.allSettled(
+    SHARDS.map((s) =>
+      fetch(`${appUrlFor(s)}/metrics`).then((r) => r.json() as Promise<Record<string, number>>),
+    ),
+  );
+
+  const nodes: Record<string, number>[] = [];
+  const total = {
+    searchesReceived: 0,
+    batchesFlushed: 0,
+    rowsUpserted: 0,
+    cacheHits: 0,
+    cacheMisses: 0,
+    buffered: 0,
+  };
+  for (const r of results) {
+    if (r.status !== "fulfilled") continue;
+    const m = r.value;
+    nodes.push(m);
+    for (const k of Object.keys(total) as (keyof typeof total)[]) total[k] += m[k] ?? 0;
+  }
+
+  const suggestTotal = total.cacheHits + total.cacheMisses;
+  return Response.json({
+    total: {
+      ...total,
+      cacheHitRate: suggestTotal > 0 ? total.cacheHits / suggestTotal : null,
+      writeReduction:
+        total.batchesFlushed > 0 ? total.searchesReceived / total.batchesFlushed : null,
+    },
+    nodes,
+  });
+}
+
 const server = Bun.serve({
   port: PORT,
   async fetch(req) {
@@ -100,6 +136,11 @@ const server = Bun.serve({
       const raw = Number(url.searchParams.get("limit"));
       const limit = Number.isInteger(raw) && raw > 0 ? raw : TRENDING_LIMIT;
       return mergedTrending(limit);
+    }
+
+    // ---- API: GET /metrics (fan-out + sum) -------------------------------
+    if (req.method === "GET" && pathname === "/metrics") {
+      return aggregatedMetrics();
     }
 
     // ---- API: GET /cache/debug?prefix=<p> --------------------------------

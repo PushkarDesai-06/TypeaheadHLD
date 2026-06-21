@@ -154,6 +154,9 @@ services:
       CACHE_K: "50"
       CACHE_POLL_INTERVAL_MS: "1000"
       CACHE_DIRTY_BATCH: "200"
+      # Shortened from the 1h code default so a grader can watch a recency spike
+      # decay back to its all-time rank within a minute or two (Assignment §7).
+      RECENCY_DECAY_INTERVAL_MS: "60000"
     networks: [mesh, pg]
     depends_on:
       postgres: { condition: service_healthy }

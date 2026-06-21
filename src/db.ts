@@ -16,7 +16,7 @@
  */
 
 import { SQL } from "bun";
-import { MAX_PREFIX_LEN } from "./config";
+import { MAX_PREFIX_LEN, RECENCY_HIST_WEIGHT, RECENCY_WEIGHT } from "./config";
 
 export const DATABASE_URL =
   process.env.DATABASE_URL ?? "postgres://typeahead:typeahead@localhost:5432/typeahead";
@@ -31,6 +31,22 @@ export interface CountRow {
 }
 
 /**
+ * The blended recency score as a raw SQL fragment — the SINGLE source of truth
+ * for the formula, reused by the live recency query, the cold-start derivation
+ * and the cache-updater so every path ranks identically.
+ *
+ *     HIST_WEIGHT · log2(1 + count) + RECENCY_WEIGHT · log2(1 + recent_count)
+ *
+ * Both weights are Number()-coerced config values (never user input), so inlining
+ * them is injection-safe. log2 compresses each signal (diminishing returns) so a
+ * burst of recent activity can overtake a stale all-time leader — but not on a
+ * single hit. See `config.ts` for the full rationale (Assignment §7).
+ */
+const HW = Number.isFinite(RECENCY_HIST_WEIGHT) ? RECENCY_HIST_WEIGHT : 1;
+const RW = Number.isFinite(RECENCY_WEIGHT) ? RECENCY_WEIGHT : 3;
+export const RECENCY_SCORE_SQL = `(${HW} * log(2.0, (1 + count)::numeric) + ${RW} * log(2.0, (1 + recent_count)::numeric))`;
+
+/**
  * Create the schema if absent. The seeder is the single DDL writer (so app
  * nodes / the updater never race on CREATE INDEX), but it is idempotent.
  *
@@ -40,9 +56,13 @@ export interface CountRow {
 export async function bootstrapSchema(client: SQL = db): Promise<void> {
   await client`
     CREATE TABLE IF NOT EXISTS query_counts (
-      query TEXT PRIMARY KEY,
-      count BIGINT NOT NULL
+      query        TEXT PRIMARY KEY,
+      count        BIGINT NOT NULL,
+      recent_count BIGINT NOT NULL DEFAULT 0
     );
+    -- recency signal: a decaying counter of recent activity (Assignment §7).
+    -- ADD COLUMN keeps the schema idempotent if an older table already exists.
+    ALTER TABLE query_counts ADD COLUMN IF NOT EXISTS recent_count BIGINT NOT NULL DEFAULT 0;
     CREATE INDEX IF NOT EXISTS query_counts_query_pattern_idx
       ON query_counts (query text_pattern_ops);
     CREATE TABLE IF NOT EXISTS dirty_prefixes (
@@ -72,14 +92,18 @@ export async function recordCountsAndDirty(
   prefixes: Set<string>,
 ): Promise<void> {
   if (counts.size === 0) return;
-  const countRows = [...counts].map(([query, count]) => ({ query, count }));
+  // recent_count is seeded with the same delta as count so a brand-new query is
+  // immediately "recent"; on conflict both grow by the delta. recent_count is
+  // later decayed (see decayRecentCounts) while count is permanent.
+  const countRows = [...counts].map(([query, count]) => ({ query, count, recent_count: count }));
   const prefixRows = [...prefixes].map((prefix) => ({ prefix }));
 
   await db.begin(async (tx) => {
     await tx`
-      INSERT INTO query_counts ${tx(countRows, "query", "count")}
+      INSERT INTO query_counts ${tx(countRows, "query", "count", "recent_count")}
       ON CONFLICT (query) DO UPDATE
-        SET count = query_counts.count + EXCLUDED.count
+        SET count = query_counts.count + EXCLUDED.count,
+            recent_count = query_counts.recent_count + EXCLUDED.recent_count
     `;
     if (prefixRows.length > 0) {
       await tx`
@@ -121,9 +145,56 @@ export async function topKForPrefix(
   `) as CountRow[];
 }
 
-/** A derived cache row: the top-K for `prefix`. */
+/**
+ * The top-K queries for a single prefix ranked by the blended RECENCY score
+ * (Assignment §7, enhanced ranking). Ordered over ALL candidates for the prefix
+ * — not just the count-leaders — so a low-all-time but currently-hot query can
+ * surface. `count` in the returned rows is the blended score (stored as the
+ * `qr:<prefix>` ZSET score). Same deterministic `query ASC` tiebreak as basic.
+ * Uses `unsafe` to inline RECENCY_SCORE_SQL; the prefix/k are parameterised.
+ */
+export async function topKForPrefixRecency(
+  prefix: string,
+  k: number,
+  client: SQL = db,
+): Promise<CountRow[]> {
+  return (await client.unsafe(
+    `SELECT query, round(${RECENCY_SCORE_SQL}, 6)::float8 AS count
+       FROM query_counts
+      WHERE query LIKE $1 ESCAPE '\\'
+      ORDER BY ${RECENCY_SCORE_SQL} DESC, query ASC
+      LIMIT $2`,
+    [escapeLike(prefix) + "%", k],
+  )) as CountRow[];
+}
+
+/**
+ * Decay every non-zero `recent_count` by `factor` (e.g. 0.5) and return the
+ * queries that were affected. The caller re-derives those queries' prefixes so
+ * the served recency cache actually reflects the decay — otherwise a query that
+ * spiked then went silent would keep its inflated rank forever (exactly the
+ * "permanently over-ranking short-lived popular queries" failure §7 warns about).
+ * `floor` lets a fading spike reach 0 and drop out, converging the recency order
+ * back toward all-time popularity.
+ */
+export async function decayRecentCounts(
+  factor: number,
+  client: SQL = db,
+): Promise<string[]> {
+  const rows = (await client.unsafe(
+    `UPDATE query_counts
+        SET recent_count = floor(recent_count * $1)
+      WHERE recent_count > 0
+      RETURNING query`,
+    [factor],
+  )) as { query: string }[];
+  return rows.map((r) => r.query);
+}
+
+/** A derived cache row: the top-K for `prefix`. `recency_score` is the blend. */
 export interface DerivedRow extends CountRow {
   prefix: string;
+  recency_score: number;
 }
 
 /**
@@ -138,18 +209,26 @@ export async function* deriveAllTopK(
   client: SQL = db,
 ): AsyncGenerator<DerivedRow[]> {
   for (let len = 1; len <= MAX_PREFIX_LEN; len++) {
-    const batch = (await client`
-      WITH expanded AS (
-        SELECT query, count, left(query, ${len}) AS prefix
-        FROM query_counts
-        WHERE length(query) >= ${len}
-      ), ranked AS (
-        SELECT prefix, query, count,
-               row_number() OVER (PARTITION BY prefix ORDER BY count DESC, query ASC) AS rn
-        FROM expanded
-      )
-      SELECT prefix, query, count FROM ranked WHERE rn <= ${k}
-    `) as DerivedRow[];
+    // At cold start recent_count = 0, so recency_score is monotonic in count and
+    // the count-ordered top-K is also the recency top-K — both shard caches can
+    // be seeded from one pass. `recency_score` shares RECENCY_SCORE_SQL with the
+    // live path, so there is no formula drift. `unsafe` because that fragment is
+    // raw SQL; $1 (len) is reused, $2 is k — both parameterised.
+    const batch = (await client.unsafe(
+      `WITH expanded AS (
+         SELECT query, count, recent_count, left(query, $1) AS prefix
+         FROM query_counts
+         WHERE length(query) >= $1
+       ), ranked AS (
+         SELECT prefix, query, count, recent_count,
+                row_number() OVER (PARTITION BY prefix ORDER BY count DESC, query ASC) AS rn
+         FROM expanded
+       )
+       SELECT prefix, query, count,
+              round(${RECENCY_SCORE_SQL}, 6)::float8 AS recency_score
+       FROM ranked WHERE rn <= $2`,
+      [len, k],
+    )) as DerivedRow[];
     if (batch.length > 0) yield batch;
   }
 }

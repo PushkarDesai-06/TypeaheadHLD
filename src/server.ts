@@ -29,7 +29,13 @@
 
 import { RedisClient } from "bun";
 import { route } from "./hash-ring";
-import { db, recordCountsAndDirty } from "./db";
+import {
+  db,
+  recordCountsAndDirty,
+  topKForPrefix,
+  topKForPrefixRecency,
+  markDirty,
+} from "./db";
 import {
   BATCH_SIZE,
   FLUSH_INTERVAL_MS,
@@ -41,6 +47,8 @@ import {
   normalize,
   prefixesOf,
   suggestKey,
+  recencyKey,
+  rankModeOf,
   redisUrlFor,
   type ShardId,
 } from "./config";
@@ -59,6 +67,20 @@ const redis = new RedisClient(REDIS_URL);
 const buffer: string[] = [];
 /** The in-progress drain, if any. Ensures only one drain runs at a time. */
 let draining: Promise<void> | null = null;
+
+/**
+ * In-memory observability counters, exposed at `GET /metrics` and aggregated by
+ * the LB. They make the assignment's Non-Functional asks measurable: the cache
+ * hit rate (`cacheHits` vs `cacheMisses`) and the write-reduction from batching
+ * (`searchesReceived` per `batchesFlushed`). All approximate, reset on restart.
+ */
+const metrics = {
+  searchesReceived: 0, // POST /search calls accepted into the buffer
+  batchesFlushed: 0, // batch transactions written to Postgres
+  rowsUpserted: 0, // unique (query,count) rows upserted across all batches
+  cacheHits: 0, // /suggest served from the Redis shard
+  cacheMisses: 0, // /suggest that fell back to Postgres (§6)
+};
 
 /**
  * Write one BATCH_SIZE chunk:
@@ -100,9 +122,12 @@ async function writeChunk(batch: string[]): Promise<void> {
   // 2) Durable counts + dirty marks -> Postgres (source of truth), one tx.
   await recordCountsAndDirty(counts, prefixes);
 
+  metrics.batchesFlushed++;
+  metrics.rowsUpserted += counts.size;
   console.log(
     `[app${SHARD_ID}] flushed ${batch.length} searches ` +
-      `(${counts.size} unique, ${prefixes.size} prefixes dirtied)`,
+      `(${counts.size} unique, ${prefixes.size} prefixes dirtied) ` +
+      `[batch #${metrics.batchesFlushed}]`,
   );
 }
 
@@ -183,32 +208,55 @@ end
 return 1
 `;
 
+interface ScoredEntry {
+  query: string;
+  count: string | number;
+}
 interface CacheUpdate {
   prefix: string;
-  topK: { query: string; count: string | number }[];
+  /** Top-K ordered by all-time count -> the `q:<prefix>` ZSET. */
+  topK: ScoredEntry[];
+  /** Top-K ordered by blended recency score -> the `qr:<prefix>` ZSET (§7). */
+  topKRecency?: ScoredEntry[];
+}
+
+/** Flatten a scored top-K into the `[score, member, ...]` ARGV REPLACE_LUA wants. */
+function toArgv(entries: ScoredEntry[]): string[] {
+  const argv: string[] = [];
+  for (const { query, count } of entries) argv.push(String(count), query);
+  return argv;
 }
 
 /**
- * Apply a batch of cache replacements to THIS shard's local Redis. Prefixes
- * this shard does not own (route(prefix) !== SHARD_ID) are rejected as a guard,
- * so a misrouted update can never plant a key on the wrong shard.
+ * Apply a batch of cache replacements to THIS shard's local Redis. Each prefix
+ * carries BOTH rankings: the all-time `q:<prefix>` cache and the recency
+ * `qr:<prefix>` cache, replaced atomically. Prefixes this shard does not own
+ * (route(prefix) !== SHARD_ID) are rejected as a guard, so a misrouted update
+ * can never plant a key on the wrong shard.
  */
 async function applyCacheUpdates(
   updates: CacheUpdate[],
 ): Promise<{ applied: number; rejected: number }> {
   const pipeline: Promise<unknown>[] = [];
+  let applied = 0;
   let rejected = 0;
-  for (const { prefix, topK } of updates) {
+  for (const { prefix, topK, topKRecency } of updates) {
     if (route(prefix) !== SHARD_ID) {
       rejected++;
       continue;
     }
-    const argv: string[] = [];
-    for (const { query, count } of topK) argv.push(String(count), query);
-    pipeline.push(redis.send("EVAL", [REPLACE_LUA, "1", suggestKey(prefix), ...argv]));
+    pipeline.push(
+      redis.send("EVAL", [REPLACE_LUA, "1", suggestKey(prefix), ...toArgv(topK)]),
+    );
+    if (topKRecency) {
+      pipeline.push(
+        redis.send("EVAL", [REPLACE_LUA, "1", recencyKey(prefix), ...toArgv(topKRecency)]),
+      );
+    }
+    applied++;
   }
   await Promise.all(pipeline);
-  return { applied: pipeline.length, rejected };
+  return { applied, rejected };
 }
 
 // ---------------------------------------------------------------------------
@@ -249,19 +297,40 @@ const server = Bun.serve({
   async fetch(req) {
     const url = new URL(req.url);
 
-    // GET /suggest?q=<prefix> — read top-N from the local shard.
+    // GET /suggest?q=<prefix>[&rank=basic|recency] — read top-N from the local
+    // shard, falling back to Postgres on a cache miss (§6). `rank=recency`
+    // reads the blended-score cache (§7); default reads all-time count.
     if (req.method === "GET" && url.pathname === "/suggest") {
       const prefix = normalize(url.searchParams.get("q") ?? "");
-      if (!prefix) return json({ prefix: "", suggestions: [] });
+      if (!prefix) return json({ prefix: "", suggestions: [], source: "cache" });
 
       const limit = parseLimit(url.searchParams.get("limit"), SUGGEST_LIMIT);
-      const suggestions = (await redis.send("ZREVRANGE", [
-        suggestKey(prefix),
+      const rank = rankModeOf(url.searchParams.get("rank"));
+      const key = rank === "recency" ? recencyKey(prefix) : suggestKey(prefix);
+
+      let suggestions = (await redis.send("ZREVRANGE", [
+        key,
         "0",
         String(limit - 1),
       ])) as string[];
+      let source = "cache";
 
-      return json({ shard: SHARD_ID, prefix, suggestions });
+      // Cache miss -> fall back to the primary data store, then warm the cache
+      // by marking the prefix dirty (fire-and-forget; the updater rebuilds it).
+      if (suggestions.length === 0) {
+        metrics.cacheMisses++;
+        const rows =
+          rank === "recency"
+            ? await topKForPrefixRecency(prefix, limit)
+            : await topKForPrefix(prefix, limit);
+        suggestions = rows.map((r) => r.query);
+        source = "db";
+        if (suggestions.length > 0) markDirty([prefix]).catch(() => {});
+      } else {
+        metrics.cacheHits++;
+      }
+
+      return json({ shard: SHARD_ID, prefix, rank, source, suggestions });
     }
 
     // POST /search {query} — buffer + 202 Accepted (no synchronous write).
@@ -274,6 +343,7 @@ const server = Bun.serve({
       }
       if (!query) return json({ error: "missing query" }, 400);
 
+      metrics.searchesReceived++;
       const buffered = buffer.push(query); // push returns the new length
       if (buffered >= BATCH_SIZE) void scheduleFlush(); // primary trigger (Step 4)
 
@@ -298,13 +368,39 @@ const server = Bun.serve({
       const prefix = normalize(url.searchParams.get("prefix") ?? "");
       if (!prefix) return json({ error: "missing prefix" }, 400);
 
-      const cached = Number(await redis.send("ZCARD", [suggestKey(prefix)]));
+      const [cachedRaw, cachedRecencyRaw] = await Promise.all([
+        redis.send("ZCARD", [suggestKey(prefix)]),
+        redis.send("ZCARD", [recencyKey(prefix)]),
+      ]);
+      const cached = Number(cachedRaw);
+      const cachedRecency = Number(cachedRecencyRaw);
       return json({
         prefix,
         node: `app${SHARD_ID}`,
         shard: SHARD_ID,
         status: cached > 0 ? "hit" : "miss",
-        cached,
+        cached, // entries in the all-time `q:<prefix>` cache
+        recencyCached: cachedRecency, // entries in the recency `qr:<prefix>` cache
+      });
+    }
+
+    // GET /metrics — per-node observability counters (LB aggregates these).
+    if (req.method === "GET" && url.pathname === "/metrics") {
+      const suggestTotal = metrics.cacheHits + metrics.cacheMisses;
+      return json({
+        shard: SHARD_ID,
+        buffered: buffer.length,
+        searchesReceived: metrics.searchesReceived,
+        batchesFlushed: metrics.batchesFlushed,
+        rowsUpserted: metrics.rowsUpserted,
+        cacheHits: metrics.cacheHits,
+        cacheMisses: metrics.cacheMisses,
+        cacheHitRate: suggestTotal > 0 ? metrics.cacheHits / suggestTotal : null,
+        // Searches absorbed per database transaction — the batching win (§8).
+        writeReduction:
+          metrics.batchesFlushed > 0
+            ? metrics.searchesReceived / metrics.batchesFlushed
+            : null,
       });
     }
 

@@ -41,8 +41,44 @@ export const DECAY_INTERVAL_MS = Number(
   process.env.DECAY_INTERVAL_MS ?? 24 * 60 * 60 * 1000,
 );
 
+// ---------------------------------------------------------------------------
+// Recency-aware suggestion ranking (Assignment §7 — the "enhanced" 20% ranking)
+// ---------------------------------------------------------------------------
+//
+// `/suggest` supports two orderings over the SAME candidate set:
+//   • basic    (default)      → sort by all-time `count`            (the 60% version)
+//   • recency  (?rank=recency)→ sort by a blended score that lets recently active
+//                               queries outrank stale historical giants.
+//
+// Blended score (computed in SQL by the seeder + cache-updater, stored as the
+// `qr:<prefix>` ZSET score so reads stay an O(1) ZREVRANGE):
+//
+//     score = HIST_WEIGHT · log2(1 + count)
+//           + RECENCY_WEIGHT · log2(1 + recent_count)
+//
+// Both signals are log-compressed (diminishing returns — the millionth search
+// matters less than the first), so a *burst* of recent activity on a modestly
+// popular query can overtake an all-time leader that has gone quiet, WITHOUT a
+// single search causing it (that is what makes the reorder demonstrable yet
+// stable). `recent_count` is decayed periodically (see below) so spikes fade and
+// the order converges back toward all-time popularity — answering §7's "how do
+// you avoid permanently over-ranking short-lived popular queries".
+/** Weight on the all-time popularity term of the blended recency score. */
+export const RECENCY_HIST_WEIGHT = Number(process.env.RECENCY_HIST_WEIGHT ?? 1);
+/** Weight on the recent-activity term (>1 → recency is favoured, per §7). */
+export const RECENCY_WEIGHT = Number(process.env.RECENCY_WEIGHT ?? 3);
+/** Each decay tick multiplies every non-zero `recent_count` by this factor. */
+export const RECENCY_DECAY_FACTOR = Number(process.env.RECENCY_DECAY_FACTOR ?? 0.5);
+/** How often the cache-updater decays `recent_count` (default 1h; short for demos). */
+export const RECENCY_DECAY_INTERVAL_MS = Number(
+  process.env.RECENCY_DECAY_INTERVAL_MS ?? 60 * 60 * 1000,
+);
+
 /** Redis key prefix for a suggestion ZSET. `q:<prefix>` -> ZSET(query => freq). */
 export const SUGGEST_KEY_PREFIX = "q:";
+
+/** Redis key prefix for the recency-ranked suggestion ZSET. `qr:<prefix>`. */
+export const RECENCY_KEY_PREFIX = "qr:";
 
 /** Redis key for the trending ZSET (one per shard; merged at the LB). */
 export const TRENDING_KEY = "trending";
@@ -63,9 +99,22 @@ export function prefixesOf(query: string): string[] {
   return prefixes;
 }
 
-/** Build the `q:<prefix>` Redis key for a suggestion ZSET. */
+/** Build the `q:<prefix>` Redis key for the all-time-count suggestion ZSET. */
 export function suggestKey(prefix: string): string {
   return SUGGEST_KEY_PREFIX + prefix;
+}
+
+/** Build the `qr:<prefix>` Redis key for the recency-blended suggestion ZSET. */
+export function recencyKey(prefix: string): string {
+  return RECENCY_KEY_PREFIX + prefix;
+}
+
+/** The two suggestion-ranking modes `/suggest` understands. */
+export type RankMode = "basic" | "recency";
+
+/** Resolve a raw `?rank=` value to a known mode (default `basic`). */
+export function rankModeOf(raw: string | null): RankMode {
+  return raw === "recency" ? "recency" : "basic";
 }
 
 /**

@@ -15,15 +15,31 @@
  */
 
 import { route } from "./hash-ring";
-import { db, topKForPrefix, markDirty, type CountRow } from "./db";
-import { CACHE_K, SHARDS, appUrlFor, type ShardId } from "./config";
+import {
+  db,
+  topKForPrefix,
+  topKForPrefixRecency,
+  decayRecentCounts,
+  markDirty,
+  type CountRow,
+} from "./db";
+import {
+  CACHE_K,
+  SHARDS,
+  appUrlFor,
+  prefixesOf,
+  RECENCY_DECAY_FACTOR,
+  RECENCY_DECAY_INTERVAL_MS,
+  type ShardId,
+} from "./config";
 
 const POLL_INTERVAL_MS = Number(process.env.CACHE_POLL_INTERVAL_MS ?? 1000);
 const DIRTY_BATCH = Number(process.env.CACHE_DIRTY_BATCH ?? 200);
 
 interface PrefixUpdate {
   prefix: string;
-  topK: CountRow[];
+  topK: CountRow[]; // ranked by all-time count -> q:<prefix>
+  topKRecency: CountRow[]; // ranked by blended recency score -> qr:<prefix>
 }
 
 /** POST one shard's batch of cache updates to its app node. */
@@ -59,9 +75,15 @@ async function runCycle(): Promise<number> {
   if (claimed.length === 0) return 0;
   const prefixes = claimed.map((c) => c.prefix);
 
-  // Recompute top-K for each prefix (bounded by the PG pool size).
+  // Recompute BOTH rankings for each prefix (bounded by the PG pool size): the
+  // all-time top-K and the blended recency top-K. Both are pushed so /suggest
+  // can serve either ordering from a local ZREVRANGE.
   const updates = await Promise.all(
-    prefixes.map(async (prefix) => ({ prefix, topK: await topKForPrefix(prefix, CACHE_K) })),
+    prefixes.map(async (prefix) => ({
+      prefix,
+      topK: await topKForPrefix(prefix, CACHE_K),
+      topKRecency: await topKForPrefixRecency(prefix, CACHE_K),
+    })),
   );
 
   // Group by the shard that owns each prefix, then push one batch per shard.
@@ -110,9 +132,36 @@ async function tick(): Promise<void> {
 
 const timer = setInterval(() => void tick(), POLL_INTERVAL_MS);
 
+// ---------------------------------------------------------------------------
+// Recency decay (Assignment §7) — runs here (single instance) because it
+// mutates Postgres `recent_count`, the source of truth, rather than per-shard
+// Redis (that is the app nodes' trending ZSET decay). Decaying then re-marking
+// the affected queries' prefixes dirty is what actually lets a faded spike fall
+// in the served recency cache — without it, a query that spiked then went quiet
+// would keep its inflated rank forever.
+// ---------------------------------------------------------------------------
+async function runRecencyDecay(): Promise<void> {
+  try {
+    const affected = await decayRecentCounts(RECENCY_DECAY_FACTOR);
+    if (affected.length === 0) return;
+    const prefixes = new Set<string>();
+    for (const q of affected) for (const p of prefixesOf(q)) prefixes.add(p);
+    await markDirty([...prefixes]);
+    console.log(
+      `[updater] decayed recent_count for ${affected.length} queries; ` +
+        `re-marked ${prefixes.size} prefixes for recency-cache rebuild`,
+    );
+  } catch (err) {
+    console.error("[updater] recency decay failed:", err);
+  }
+}
+
+const decayTimer = setInterval(() => void runRecencyDecay(), RECENCY_DECAY_INTERVAL_MS);
+
 const shutdown = async () => {
   console.log("[updater] shutting down ...");
   clearInterval(timer);
+  clearInterval(decayTimer);
   while (running) await new Promise((r) => setTimeout(r, 20)); // let the cycle finish
   await db.close({ timeout: 5 });
   process.exit(0);

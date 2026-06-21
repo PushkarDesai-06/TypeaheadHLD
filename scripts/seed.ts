@@ -14,8 +14,18 @@
 
 import { RedisClient } from "bun";
 import { SHARDS, route, type ShardId } from "../src/hash-ring";
-import { normalize, redisUrlFor, suggestKey, CACHE_K } from "../src/config";
+import { normalize, redisUrlFor, suggestKey, recencyKey, CACHE_K } from "../src/config";
 import { db, bootstrapSchema, bulkLoadCounts, deriveAllTopK } from "../src/db";
+
+/**
+ * Keep a row only if its normalised query contains at least one alphanumeric
+ * character. The raw dataset's top entry is `"-"` (blank AOL searches, ~98k
+ * hits) plus other pure-punctuation noise that would otherwise dominate the
+ * `q:` / `q:-` caches with junk. Real single-letter queries ("g", "m") survive.
+ */
+function isUsableQuery(q: string): boolean {
+  return /[a-z0-9]/i.test(q);
+}
 
 const DATA_PATH = process.env.DATA_PATH ?? "data/search_frequencies.json";
 const CHUNK = Number(process.env.SEED_CHUNK ?? 5000);
@@ -51,12 +61,19 @@ async function main() {
   // and so no single bulk-insert chunk touches the same row twice (which would
   // abort the ON CONFLICT statement).
   const totals = new Map<string, number>();
+  let dropped = 0;
   for (const { query, count } of entries) {
     const q = normalize(query);
-    if (!q) continue;
+    if (!q || !isUsableQuery(q)) {
+      dropped++;
+      continue;
+    }
     totals.set(q, (totals.get(q) ?? 0) + count);
   }
-  console.log(`[seed] ${entries.length.toLocaleString()} rows -> ${totals.size.toLocaleString()} unique queries`);
+  console.log(
+    `[seed] ${entries.length.toLocaleString()} rows -> ${totals.size.toLocaleString()} ` +
+      `unique queries (${dropped.toLocaleString()} junk/blank rows filtered)`,
+  );
 
   let rows: { query: string; count: number }[] = [];
   let loaded = 0;
@@ -88,10 +105,15 @@ async function main() {
     await Promise.all(batch);
   };
 
+  // Seed BOTH caches: the all-time `q:<prefix>` (score = count) and the recency
+  // `qr:<prefix>` (score = blended recency_score). At cold start recent_count=0,
+  // so the recency order equals the count order — one derivation pass feeds both
+  // (the cache-updater diverges them once live searches bump recent_count).
   for await (const batch of deriveAllTopK(CACHE_K)) {
-    for (const { prefix, query, count } of batch) {
+    for (const { prefix, query, count, recency_score } of batch) {
       const shard = route(prefix);
       pending.push(clients[shard].send("ZADD", [suggestKey(prefix), count, query]));
+      pending.push(clients[shard].send("ZADD", [recencyKey(prefix), String(recency_score), query]));
       perShard[shard]++;
       cacheRows++;
       if (pending.length >= CHUNK) await flush();
