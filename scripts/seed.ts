@@ -1,0 +1,116 @@
+/**
+ * Data Loader / Seeder — two phase.
+ *
+ * Phase 1: load the dataset into central Postgres `query_counts` (the source of
+ *          truth). The seeder is also the single DDL writer (bootstrapSchema).
+ * Phase 2: DERIVE the per-prefix top-K suggestion caches from Postgres and bulk
+ *          load them into the Redis shards (each prefix -> route(prefix)'s shard,
+ *          capped at CACHE_K — the exact policy the cache-updater uses live, so
+ *          the cold cache and the live cache are identical in shape).
+ *
+ * Run:  bun run scripts/seed.ts
+ * Env:  DATABASE_URL, REDIS_URL_1/2/3, SEED_FLUSH=0 to skip wiping first.
+ */
+
+import { RedisClient } from "bun";
+import { SHARDS, route, type ShardId } from "../src/hash-ring";
+import { normalize, redisUrlFor, suggestKey, CACHE_K } from "../src/config";
+import { db, bootstrapSchema, bulkLoadCounts, deriveAllTopK } from "../src/db";
+
+const DATA_PATH = process.env.DATA_PATH ?? "data/search_frequencies.json";
+const CHUNK = Number(process.env.SEED_CHUNK ?? 5000);
+const FLUSH_FIRST = process.env.SEED_FLUSH !== "0";
+
+interface Entry {
+  query: string;
+  count: number;
+}
+
+async function main() {
+  await bootstrapSchema();
+  console.log("[seed] schema ready");
+
+  // Redis shard clients (seeder is infra: it may touch all shards).
+  const clients: Record<ShardId, RedisClient> = {} as Record<ShardId, RedisClient>;
+  for (const shard of SHARDS) {
+    clients[shard] = new RedisClient(redisUrlFor(shard));
+    await clients[shard].connect();
+  }
+
+  if (FLUSH_FIRST) {
+    console.log("[seed] wiping Postgres tables + Redis shards for a clean reseed ...");
+    await db`TRUNCATE query_counts, dirty_prefixes`;
+    await Promise.all(SHARDS.map((s) => clients[s].send("FLUSHDB", [])));
+  }
+
+  // --- Phase 1: load counts into Postgres (source of truth) ----------------
+  console.log(`[seed] reading ${DATA_PATH} ...`);
+  const entries: Entry[] = JSON.parse(await Bun.file(DATA_PATH).text());
+
+  // Aggregate by normalized query so duplicates (e.g. "Google"/"google") merge —
+  // and so no single bulk-insert chunk touches the same row twice (which would
+  // abort the ON CONFLICT statement).
+  const totals = new Map<string, number>();
+  for (const { query, count } of entries) {
+    const q = normalize(query);
+    if (!q) continue;
+    totals.set(q, (totals.get(q) ?? 0) + count);
+  }
+  console.log(`[seed] ${entries.length.toLocaleString()} rows -> ${totals.size.toLocaleString()} unique queries`);
+
+  let rows: { query: string; count: number }[] = [];
+  let loaded = 0;
+  for (const [query, count] of totals) {
+    rows.push({ query, count });
+    if (rows.length >= CHUNK) {
+      await bulkLoadCounts(rows);
+      loaded += rows.length;
+      rows = [];
+      if (loaded % 50000 < CHUNK) console.log(`[seed] loaded ${loaded.toLocaleString()} into Postgres`);
+    }
+  }
+  if (rows.length) {
+    await bulkLoadCounts(rows);
+    loaded += rows.length;
+  }
+  console.log(`[seed] Postgres load done: ${loaded.toLocaleString()} queries`);
+
+  // --- Phase 2: derive per-prefix top-K caches into the shards -------------
+  console.log(`[seed] deriving top-${CACHE_K} caches into shards ...`);
+  const perShard: Record<ShardId, number> = { "1": 0, "2": 0, "3": 0 };
+  let pending: Promise<unknown>[] = [];
+  let cacheRows = 0;
+
+  const flush = async () => {
+    if (pending.length === 0) return;
+    const batch = pending;
+    pending = [];
+    await Promise.all(batch);
+  };
+
+  for await (const batch of deriveAllTopK(CACHE_K)) {
+    for (const { prefix, query, count } of batch) {
+      const shard = route(prefix);
+      pending.push(clients[shard].send("ZADD", [suggestKey(prefix), count, query]));
+      perShard[shard]++;
+      cacheRows++;
+      if (pending.length >= CHUNK) await flush();
+    }
+    await flush();
+    console.log(`[seed] derived through len -> ${cacheRows.toLocaleString()} cache rows`);
+  }
+  await flush();
+
+  console.log(`[seed] done. ${cacheRows.toLocaleString()} cache rows`);
+  for (const shard of SHARDS) {
+    console.log(`[seed]   shard ${shard}: ${perShard[shard].toLocaleString()} cache rows`);
+  }
+
+  for (const shard of SHARDS) clients[shard].close();
+  await db.close();
+}
+
+main().catch((err) => {
+  console.error("[seed] failed:", err);
+  process.exit(1);
+});
