@@ -1,0 +1,64 @@
+# Ring hash comparison
+bun 1.4.2, 16 threads, shards=3, deployed vnodes=150
+real prefixes: 932,701 (from data/search_frequencies.json, max len 32)
+
+== 1. speed (ns/hash, best of 3 over all prefixes) ==
+fnv1a32 (original)        54 ns
+fnv1a32 + fmix32          68 ns
+murmur32v3 (deployed)     63 ns
+murmur64v2 (hi32)         92 ns
+xxHash64 (hi32)           76 ns
+
+== 2. balance as deployed (3 shards, labels `${shard}#${v}`), share per shard ==
+vn=50  fnv1a32 (original)       30.7 / 48.6 / 20.7   worst dev  45.9%
+vn=50  fnv1a32 + fmix32         40.2 / 30.9 / 28.9   worst dev  20.7%
+vn=50  murmur32v3 (deployed)    31.7 / 36.2 / 32.1   worst dev   8.5%
+vn=50  murmur64v2 (hi32)        40.5 / 32.6 / 26.9   worst dev  21.5%
+vn=50  xxHash64 (hi32)          32.7 / 35.2 / 32.1   worst dev   5.6%
+
+vn=150 fnv1a32 (original)       32.3 / 25.2 / 42.5   worst dev  27.6%
+vn=150 fnv1a32 + fmix32         33.8 / 34.0 / 32.2   worst dev   3.4%
+vn=150 murmur32v3 (deployed)    35.6 / 31.5 / 32.9   worst dev   6.9%
+vn=150 murmur64v2 (hi32)        35.1 / 31.8 / 33.1   worst dev   5.2%
+vn=150 xxHash64 (hi32)          33.1 / 33.9 / 33.0   worst dev   1.7%
+
+vn=500 fnv1a32 (original)       37.5 / 35.1 / 27.4   worst dev  17.7%
+vn=500 fnv1a32 + fmix32         34.2 / 31.4 / 34.4   worst dev   5.7%
+vn=500 murmur32v3 (deployed)    33.4 / 32.5 / 34.1   worst dev   2.4%
+vn=500 murmur64v2 (hi32)        34.8 / 34.6 / 30.6   worst dev   8.3%
+vn=500 xxHash64 (hi32)          31.0 / 35.0 / 34.0   worst dev   7.1%
+
+== 3. salt sweep (30 rings per hash, worst-shard deviation from 33.3%) ==
+vn=150  (ideal random hash: per-shard relative std ~ 8.2%)
+  fnv1a32 (original)      mean  34.6%   median  32.9%   worst  87.9%
+  fnv1a32 + fmix32        mean   7.7%   median   6.9%   worst  18.3%
+  murmur32v3 (deployed)   mean   7.1%   median   7.1%   worst  13.7%
+  murmur64v2 (hi32)       mean   5.9%   median   4.8%   worst  16.3%
+  xxHash64 (hi32)         mean   6.8%   median   6.9%   worst  18.5%
+vn=500  (ideal random hash: per-shard relative std ~ 4.5%)
+  fnv1a32 (original)      mean  20.6%   median  23.1%   worst  35.6%
+  fnv1a32 + fmix32        mean   5.0%   median   5.1%   worst   9.0%
+  murmur32v3 (deployed)   mean   4.6%   median   4.6%   worst  10.2%
+  murmur64v2 (hi32)       mean   4.3%   median   4.7%   worst   8.8%
+  xxHash64 (hi32)         mean   4.2%   median   4.2%   worst   9.9%
+
+== 4. add shard 4 (vn=150): keys moved (ideal 25.0%), all must go to shard 4 ==
+fnv1a32 (original)      moved  28.4%   moved between old shards: 0
+fnv1a32 + fmix32        moved  26.4%   moved between old shards: 0
+murmur32v3 (deployed)   moved  22.6%   moved between old shards: 0
+murmur64v2 (hi32)       moved  27.0%   moved between old shards: 0
+xxHash64 (hi32)         moved  25.7%   moved between old shards: 0
+
+== 5. avalanche on consecutive vnode labels `s#v` vs `s#v+1` (ideal 50% bits flipped) ==
+fnv1a32 (original)      all bits  31.0%   top 8 bits  30.3%
+fnv1a32 + fmix32        all bits  49.3%   top 8 bits  48.8%
+murmur32v3 (deployed)   all bits  50.6%   top 8 bits  51.0%
+murmur64v2 (hi32)       all bits  48.9%   top 8 bits  49.4%
+xxHash64 (hi32)         all bits  50.4%   top 8 bits  50.7%
+
+== 6. as deployed (vn=150): prefix keys vs search-weighted load per shard ==
+fnv1a32 (original)      keys  32.3 / 25.2 / 42.5   load  30.1 / 21.4 / 48.5
+fnv1a32 + fmix32        keys  33.8 / 34.0 / 32.2   load  32.9 / 35.2 / 31.9
+murmur32v3 (deployed)   keys  35.6 / 31.5 / 32.9   load  37.3 / 30.7 / 32.0
+murmur64v2 (hi32)       keys  35.1 / 31.8 / 33.1   load  36.0 / 33.0 / 31.0
+xxHash64 (hi32)         keys  33.1 / 33.9 / 33.0   load  32.1 / 37.4 / 30.6

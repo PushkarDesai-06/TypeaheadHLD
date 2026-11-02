@@ -1,10 +1,10 @@
 import { test, expect } from "bun:test";
-import { HashRing, fnv1a32, ring, route, SHARDS } from "../src/hash-ring";
+import { HashRing, ringHash, ring, route, SHARDS } from "../src/hash-ring";
 
-test("fnv1a32 is deterministic and unsigned 32-bit", () => {
-  expect(fnv1a32("google")).toBe(fnv1a32("google"));
-  expect(fnv1a32("google")).not.toBe(fnv1a32("yahoo"));
-  const h = fnv1a32("anything");
+test("ringHash is deterministic and unsigned 32-bit", () => {
+  expect(ringHash("google")).toBe(ringHash("google"));
+  expect(ringHash("google")).not.toBe(ringHash("yahoo"));
+  const h = ringHash("anything");
   expect(h).toBeGreaterThanOrEqual(0);
   expect(h).toBeLessThanOrEqual(0xffffffff);
   expect(Number.isInteger(h)).toBe(true);
@@ -33,9 +33,8 @@ test("virtual nodes spread keys reasonably evenly across shards", () => {
 
   const expected = N / SHARDS.length;
   for (const shard of SHARDS) {
-    // Each shard should land within ~25% of an even split.
-    expect(counts[shard]).toBeGreaterThan(expected * 0.75);
-    expect(counts[shard]).toBeLessThan(expected * 1.25);
+    expect(counts[shard]).toBeGreaterThan(expected * 0.9);
+    expect(counts[shard]).toBeLessThan(expected * 1.1);
   }
 });
 

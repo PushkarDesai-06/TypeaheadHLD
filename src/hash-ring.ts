@@ -28,19 +28,20 @@ export type ShardId = (typeof SHARDS)[number];
 export const VIRTUAL_NODES = 150;
 
 /**
- * FNV-1a (32-bit) — a fast, well-distributed, dependency-free string hash.
- * Returns an unsigned 32-bit integer so ring positions are stable and
- * comparable across processes/runtimes.
+ * Changing the seed (or the hash) remaps almost every key, so the shards must
+ * be re-seeded afterwards.
  */
-export function fnv1a32(str: string): number {
-  let hash = 0x811c9dc5; // FNV offset basis
-  for (let i = 0; i < str.length; i++) {
-    hash ^= str.charCodeAt(i);
-    // hash *= 16777619 (FNV prime), done with shifts to stay in 32-bit range
-    hash +=
-      (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
-  }
-  return hash >>> 0; // coerce to unsigned 32-bit
+const RING_HASH_SEED = 0;
+
+/**
+ * MurmurHash3 (32-bit) via Bun's native implementation. Returns an unsigned
+ * 32-bit integer so ring positions are stable and comparable across processes.
+ *
+ * Replaced FNV-1a, which avalanches poorly on short near-identical inputs like
+ * the vnode labels `1#0`, `1#1`, … and gave shard 3 ~42% of the ring.
+ */
+export function ringHash(str: string): number {
+  return Bun.hash.murmur32v3(str, RING_HASH_SEED) >>> 0;
 }
 
 interface RingEntry {
@@ -58,7 +59,7 @@ export class HashRing {
   ) {
     for (const shard of shards) {
       for (let v = 0; v < this.virtualNodes; v++) {
-        this.ring.push({ hash: fnv1a32(`${shard}#${v}`), shard: shard as ShardId });
+        this.ring.push({ hash: ringHash(`${shard}#${v}`), shard: shard as ShardId });
       }
     }
     this.ring.sort((a, b) => a.hash - b.hash);
@@ -70,7 +71,7 @@ export class HashRing {
    * to the start of the ring). Implemented as a binary search → O(log n).
    */
   route(key: string): ShardId {
-    const h = fnv1a32(key);
+    const h = ringHash(key);
     const ring = this.ring;
 
     let lo = 0;
