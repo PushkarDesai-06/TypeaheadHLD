@@ -21,7 +21,7 @@ node is the sole writer of its own Redis._
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | **Basic implementation (60)** | dataset ingestion `scripts/seed.ts`; suggestions UI `public/`; `GET /suggest` + `POST /search`; query-count store (Postgres); distributed cache over 3 Redis shards by consistent hashing `src/hash-ring.ts`; cache miss → Postgres fallback (§6). |
 | **Trending searches (20)**    | recency-aware `/suggest?rank=recency` + `recent_count` decay → [Trending & recency ranking](#trending--recency-aware-ranking-7); global trending board `GET /trending`. Demo: `bun run demo:recency`. |
-| **Batch writes (20)**         | in-memory buffer + `BATCH_SIZE`/interval flush `src/server.ts`; **90.9× write reduction measured** ([PERFORMANCE.md](./PERFORMANCE.md#3-write-reduction-from-batching-8)); [failure trade-offs](#batch-writes--failure-trade-offs-8). |
+| **Batch writes (20)**         | in-memory buffer + `BATCH_SIZE`/interval flush `src/server.ts`; **~89 searches per transaction at 300 searches/s, ~98 at 1,500/s, under 2 at 1/s** ([PERFORMANCE.md](./PERFORMANCE.md#3-write-reduction-from-batching-8)); [failure trade-offs](#batch-writes--failure-trade-offs-8). |
 | **Deliverables (§12)**        | README (this) · [API docs](./docs/API.md) · [Performance report](./PERFORMANCE.md) · `Architecture.png` · [screenshots](#screenshots) · [dataset](#dataset) · design notes below. |
 
 Endpoints (all via the LB): `GET /suggest?q=&rank=basic\|recency`, `POST /search`,
@@ -182,13 +182,17 @@ backed by per-shard `trending` ZSETs with a daily 10% decay.
 ## Batch writes & failure trade-offs (§8)
 
 `POST /search` never writes synchronously. The query is pushed to an in-memory
-buffer and `202` is returned immediately. A flush is triggered the instant the
-buffer hits `BATCH_SIZE` (100), with a timed `FLUSH_INTERVAL_MS` safety net for
-low traffic. A flush **dedups counts in memory** (a Map), then UPSERTs them into
-Postgres and marks affected prefixes dirty in **one transaction**.
+buffer and `202` is returned immediately. A full chunk of `BATCH_SIZE` (100) is
+written the instant the buffer reaches it, and a timer writes whatever is left
+every `FLUSH_INTERVAL_MS` (5 s). A flush **dedups counts in memory** (a Map), then
+UPSERTs them into Postgres and marks affected prefixes dirty in **one
+transaction**. Every writer locks rows in the same (byte) order, so concurrent
+flushes from different nodes cannot deadlock on shared prefixes.
 
-**Measured: ~91 searches per database transaction (90.9× write reduction)** —
-[PERFORMANCE.md §3](./PERFORMANCE.md#3-write-reduction-from-batching-8).
+**Measured searches per database transaction depend on traffic:** 1.8 at 1
+search/s, 32 at 20/s, 89 at 300/s and 98 at 1,500/s across the cluster, matching
+a simulation of the flush logic at every rate
+([PERFORMANCE.md §3](./PERFORMANCE.md#3-write-reduction-from-batching-8)).
 
 **Failure trade-offs (the honest part §8 asks for):**
 
@@ -209,19 +213,24 @@ Postgres and marks affected prefixes dirty in **one transaction**.
 
 ## Performance
 
-Headline numbers from `bun run bench` against the live cluster (full report +
-methodology + honest localhost caveat → [PERFORMANCE.md](./PERFORMANCE.md)):
+Headline numbers from fixed-rate load tests against the live cluster, 30 s per
+rate, 3 runs each (full method, all tables and caveats in
+[PERFORMANCE.md](./PERFORMANCE.md)):
 
-| Metric                                   | Value                              |
-| ---------------------------------------- | ---------------------------------- |
-| `/suggest` latency **p95**               | **1.21ms** (basic) / 1.35ms (recency) |
-| `/suggest` p99 / mean                    | 2.26ms / 0.63ms                    |
-| Throughput (concurrency 32, localhost)   | ~50,000 req/s                      |
-| Cache hit rate                           | 100% on seeded prefixes (+ live PG fallback) |
-| **Write reduction from batching**        | **90.9×**                          |
+| Metric | Value |
+| ------ | ----- |
+| Sustained rate, realistic mix (70% dataset prefixes, 20% typos, 10% novel) | **10,000 req/s** |
+| `/suggest` latency at that rate: p50 / **p95** / p99 | 0.28ms / **0.74ms** / 1.85ms |
+| Pure cache path (dataset prefixes only) | p95 0.60ms, p99 1.17ms at 15,000 req/s |
+| Recency ranking | no measurable extra latency |
+| Cache hit rate on the realistic mix | 74.5% (every miss was a prefix with no results) |
+| **Write reduction from batching** (searches per transaction) | **89×** at 300 searches/s, **98×** at 1,500/s, 1.8× at 1/s (the 5 s timer flushes first) |
+| Known weakness | LB has no load shedding: at 17,500 req/s it collapsed and took ~5.5 min to recover |
 
 ```bash
-bun run bench                 # latency + hit rate + write reduction
+bun run bench:latency         # fixed-rate latency sweep (p50/p95/p99/p99.9)
+bun run bench                 # cache hit rate
+bun run bench:writes          # write reduction at 1 to 1,500 searches/s
 curl -s localhost:8080/metrics | jq    # live cluster counters
 ```
 
@@ -269,7 +278,9 @@ bun run dev:lb                                             # http://localhost:80
 
 ```bash
 bun test            # consistent-hash determinism + balance (no cluster needed)
-bun run bench       # p50/p95/p99 latency, cache hit rate, write reduction
+bun run bench:latency  # fixed-rate p50/p95/p99 latency sweep
+bun run bench       # cache hit rate
+bun run bench:writes  # write reduction at several traffic rates
 bun run demo:recency  # §7: basic-vs-recency ranking, before/after, in logs
 ```
 

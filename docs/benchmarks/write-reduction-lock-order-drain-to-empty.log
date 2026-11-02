@@ -1,0 +1,36 @@
+# Write-reduction sweep against http://172.22.0.6:8080
+date: 2026-11-02T10:00:15.166Z
+rates (searches/s, whole cluster): 1, 5, 20, 60, 300, 1500; 60s per step; 3 repeats
+client-side model constants: BATCH_SIZE=100, FLUSH_INTERVAL_MS=5000
+note: lock-ordered flushes (rows sorted by byte order), cache-updater claims dirty prefixes with FOR UPDATE SKIP LOCKED, decay locks in the same order; traffic sent to the LB container IP
+rate     1/s #1: 60 searches -> 34 txns (1.8x, model 1.9x), 60 rows (1.0x), failed 0, drain 4437ms, pg deadlocks 0 | app1 0.3/s 18/12, app2 0.3/s 19/10, app3 0.4/s 23/12
+rate     1/s #2: 60 searches -> 34 txns (1.8x, model 1.9x), 60 rows (1.0x), failed 0, drain 1009ms, pg deadlocks 0 | app1 0.4/s 21/11, app2 0.3/s 18/11, app3 0.4/s 21/12
+rate     1/s #3: 60 searches -> 34 txns (1.8x, model 1.9x), 60 rows (1.0x), failed 0, drain 808ms, pg deadlocks 0 | app1 0.4/s 24/11, app2 0.3/s 16/11, app3 0.3/s 20/12
+rate     5/s #1: 300 searches -> 37 txns (8.1x, model 7.8x), 294 rows (1.0x), failed 0, drain 4839ms, pg deadlocks 0 | app1 1.8/s 105/13, app2 1.3/s 78/12, app3 2.0/s 117/12
+rate     5/s #2: 300 searches -> 40 txns (7.5x, model 7.8x), 284 rows (1.1x), failed 0, drain 4941ms, pg deadlocks 0 | app1 1.8/s 110/15, app2 1.2/s 73/13, app3 2.0/s 117/12
+rate     5/s #3: 300 searches -> 37 txns (8.1x, model 7.8x), 288 rows (1.0x), failed 0, drain 303ms, pg deadlocks 0 | app1 1.7/s 101/12, app2 1.4/s 81/12, app3 2.0/s 118/13
+rate    20/s #1: 1200 searches -> 38 txns (31.6x, model 30.9x), 1120 rows (1.1x), failed 0, drain 4737ms, pg deadlocks 0 | app1 6.8/s 408/13, app2 6.0/s 360/13, app3 7.2/s 432/12
+rate    20/s #2: 1200 searches -> 38 txns (31.6x, model 30.9x), 1110 rows (1.1x), failed 0, drain 4837ms, pg deadlocks 0 | app1 6.9/s 416/13, app2 5.5/s 327/13, app3 7.6/s 457/12
+rate    20/s #3: 1200 searches -> 42 txns (28.6x, model 30.9x), 1108 rows (1.1x), failed 0, drain 4738ms, pg deadlocks 0 | app1 6.8/s 406/13, app2 6.0/s 357/14, app3 7.3/s 437/15
+rate    60/s #1: 3600 searches -> 67 txns (53.7x, model 64.3x), 3235 rows (1.1x), failed 0, drain 4942ms, pg deadlocks 0 | app1 20.8/s 1245/23, app2 18.1/s 1084/20, app3 21.2/s 1271/24
+rate    60/s #2: 3600 searches -> 71 txns (50.7x, model 65.1x), 3266 rows (1.1x), failed 0, drain 4839ms, pg deadlocks 0 | app1 20.2/s 1209/25, app2 17.6/s 1053/17, app3 22.3/s 1338/29
+rate    60/s #3: 3600 searches -> 68 txns (52.9x, model 63.4x), 3241 rows (1.1x), failed 0, drain 4937ms, pg deadlocks 0 | app1 20.7/s 1241/24, app2 16.6/s 993/17, app3 22.8/s 1366/27
+rate   300/s #1: 18000 searches -> 426 txns (42.3x, model 88.7x), 16260 rows (1.1x), failed 0, drain 4848ms, pg deadlocks 0 | app1 104.8/s 6289/144, app2 84.9/s 5093/123, app3 110.3/s 6618/159
+rate   300/s #2: 18000 searches -> 420 txns (42.9x, model 88.5x), 16263 rows (1.1x), failed 0, drain 4739ms, pg deadlocks 0 | app1 105.2/s 6311/152, app2 85.1/s 5109/118, app3 109.7/s 6580/150
+rate   300/s #3: 18000 searches -> 425 txns (42.4x, model 88.5x), 16294 rows (1.1x), failed 0, drain 4638ms, pg deadlocks 0 | app1 105.5/s 6330/149, app2 85.6/s 5134/124, app3 108.9/s 6536/152
+rate  1500/s #1: 90000 searches -> 3318 txns (27.1x, model 97.9x), 81899 rows (1.1x), failed 0, drain 4648ms, pg deadlocks 0 | app1 524.1/s 31443/1231, app2 425.4/s 25523/864, app3 550.6/s 33034/1223
+rate  1500/s #2: 90000 searches -> 3233 txns (27.8x, model 97.9x), 81939 rows (1.1x), failed 0, drain 4448ms, pg deadlocks 0 | app1 525.0/s 31502/1166, app2 430.0/s 25798/883, app3 545.0/s 32700/1184
+rate  1500/s #3: 90000 searches -> 3361 txns (26.8x, model 97.9x), 81831 rows (1.1x), failed 0, drain 4542ms, pg deadlocks 0 | app1 521.4/s 31282/1186, app2 426.1/s 25564/917, app3 552.6/s 33154/1258
+
+## Summary (median [range] over the repeats that ran)
+| Rate (searches/s) | Searches per txn | Model | Searches per row written | Failed requests | Deadlocks | Verdict |
+| ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 1 | 1.8x [1.8–1.8] | 1.9x | 1.0x [1.0–1.0] | 0 | 0 | ok |
+| 5 | 8.1x [7.5–8.1] | 7.8x | 1.0x [1.0–1.1] | 0 | 0 | ok |
+| 20 | 31.6x [28.6–31.6] | 30.9x | 1.1x [1.1–1.1] | 0 | 0 | ok |
+| 60 | 52.9x [50.7–53.7] | 64.3x | 1.1x [1.1–1.1] | 0 | 0 | ok |
+| 300 | 42.4x [42.3–42.9] | 88.5x | 1.1x [1.1–1.1] | 0 | 0 | ok |
+| 1500 | 27.1x [26.8–27.8] | 97.9x | 1.1x [1.1–1.1] | 0 | 0 | ok |
+
+raw results: docs/benchmarks/write-reduction.json
+

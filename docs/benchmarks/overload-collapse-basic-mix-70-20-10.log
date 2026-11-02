@@ -1,0 +1,51 @@
+# Fixed-rate /suggest latency sweep against http://172.22.0.6:8080
+started 2026-11-02T06:48:38.288Z, bun 1.4.2, rank=basic, mix seeded 70 / typo 20 / novel 10
+rates 2500, 5000, 7500, 10000, 12500, 15000, 17500 req/s, 2 generator threads, 30s per step (+3s warm-up), 3 repeats, timeout 5000ms
+note: cluster pinned to CPUs 0-9 (docker update --cpuset-cpus 0-9); generator on CPUs 10-13 (taskset) with 2 worker threads; docker stats sampler on CPUs 14-15; traffic sent straight to the LB container IP, bypassing docker-proxy; client BUN_CONFIG_MAX_HTTP_REQUESTS=4096
+open loop: sends follow a fixed schedule and never wait on responses; failures count as inf
+
+    2500  #1  sent   2500/s  p50   0.25  p90   0.51  p99    2.10  p99.9    3.69  max     6.90  fail     0  lag p99  1.48  inflight    18  hit 74.4%  ok
+          cpu: cache-updater 0.07%, lb 22.88%, app3 18.12%, app2 13.37%, app1 17.59%, redis2 1.87%, redis3 2.06%, redis1 2.13%, postgres 8.95%
+    2500  #2  sent   2500/s  p50   0.26  p90   0.55  p99    2.14  p99.9    3.31  max     6.45  fail     0  lag p99  1.55  inflight    14  hit 74.4%  ok
+    2500  #3  sent   2500/s  p50   0.26  p90   0.77  p99    2.59  p99.9    4.16  max    10.23  fail     0  lag p99  1.77  inflight    23  hit 74.2%  ok
+    5000  #1  sent   5000/s  p50   0.26  p90   0.76  p99    2.66  p99.9    5.33  max    16.04  fail     0  lag p99  1.67  inflight    62  hit 74.4%  ok
+          cpu: cache-updater 0.15%, lb 24.70%, app3 13.07%, app2 12.92%, app1 13.40%, redis2 2.17%, redis3 4.01%, redis1 3.95%, postgres 13.62%
+    5000  #2  sent   5000/s  p50   0.26  p90   0.75  p99    2.61  p99.9    5.37  max    14.47  fail     0  lag p99  1.68  inflight    68  hit 74.4%  ok
+    5000  #3  sent   5000/s  p50   0.26  p90   0.85  p99    2.71  p99.9    5.22  max    15.67  fail     0  lag p99  1.75  inflight    77  hit 74.3%  ok
+    7500  #1  sent   7500/s  p50   0.27  p90   0.71  p99    2.63  p99.9    8.91  max    21.96  fail     0  lag p99  1.69  inflight   153  hit 74.3%  ok
+          cpu: cache-updater 0.14%, lb 30.16%, app3 16.14%, app2 14.73%, app1 16.12%, redis2 4.75%, redis3 4.89%, redis1 2.88%, postgres 16.65%
+    7500  #2  sent   7500/s  p50   0.27  p90   0.64  p99    2.61  p99.9    9.35  max    18.45  fail     0  lag p99  1.55  inflight   129  hit 74.3%  ok
+    7500  #3  sent   7500/s  p50   0.26  p90   0.44  p99    1.08  p99.9    3.41  max    15.39  fail     0  lag p99  1.30  inflight   107  hit 74.4%  ok
+   10000  #1  sent  10000/s  p50   0.28  p90   0.59  p99    2.50  p99.9   13.67  max    25.99  fail     0  lag p99  1.50  inflight   251  hit 74.4%  ok
+          cpu: cache-updater 0.59%, lb 38.62%, app3 25.08%, app2 22.96%, app1 24.42%, redis2 5.52%, redis3 3.98%, redis1 4.05%, postgres 22.11%
+   10000  #2  sent   9999/s  p50   0.29  p90   0.79  p99    2.91  p99.9   15.20  max    29.60  fail     0  lag p99  1.64  inflight   287  hit 74.3%  ok
+   10000  #3  sent   9999/s  p50   0.29  p90   0.73  p99    2.76  p99.9   14.82  max    28.89  fail     0  lag p99  1.59  inflight   216  hit 74.3%  ok
+   12500  #1  sent  12499/s  p50   0.31  p90   0.87  p99    3.11  p99.9   15.80  max    26.75  fail     0  lag p99  1.71  inflight   293  hit 74.4%  ok
+          cpu: cache-updater 0.04%, lb 39.14%, app3 18.79%, app2 19.35%, app1 19.52%, redis2 3.95%, redis3 4.01%, redis1 4.03%, postgres 33.32%
+   12500  #2  sent  12499/s  p50   0.31  p90   0.90  p99    3.68  p99.9   27.28  max    36.18  fail     0  lag p99  1.75  inflight   440  hit 74.3%  ok
+   12500  #3  sent  12499/s  p50   0.32  p90   1.32  p99   22.67  p99.9   42.69  max    52.62  fail     0  lag p99  1.78  inflight   676  hit 74.3%  ok
+   15000  #1  sent  14999/s  p50   0.34  p90   1.62  p99   23.49  p99.9   33.32  max    43.25  fail     0  lag p99  1.90  inflight   576  hit 74.3%  ok
+          cpu: cache-updater 0.52%, lb 47.76%, app3 22.59%, app2 21.83%, app1 22.47%, redis2 4.75%, redis3 4.74%, redis1 5.91%, postgres 40.38%
+   15000  #2  sent  14999/s  p50   0.38  p90   3.37  p99   33.27  p99.9   44.63  max    60.12  fail     0  lag p99  2.34  inflight   776  hit 74.4%  ok
+   15000  #3  sent  14999/s  p50   0.33  p90   1.40  p99   24.05  p99.9   45.45  max    70.65  fail     0  lag p99  1.86  inflight   910  hit 74.4%  ok
+   17500  #1  sent  17499/s  p50   1.79  p90    inf  p99     inf  p99.9     inf  max      inf  fail 175771  lag p99  2.60  inflight 88392  hit 74.4%  SATURATED
+          errors: timeout x175771
+          cpu: cache-updater 0.16%, lb 74.67%, app3 39.50%, app2 38.09%, app1 40.51%, redis2 9.11%, redis3 10.31%, redis1 10.08%, postgres 57.71%
+   17500  #2  sent  17499/s  p50    inf  p90    inf  p99     inf  p99.9     inf  max      inf  fail 525000  lag p99  2.01  inflight 89013  hit 0.0%  SATURATED
+          errors: timeout x525000
+   17500  #3  sent  17499/s  p50    inf  p90    inf  p99     inf  p99.9     inf  max      inf  fail 525000  lag p99  1.95  inflight 88940  hit 0.0%  SATURATED
+          errors: timeout x525000
+
+▶ summary (median of 3 repeats, range in brackets)
+    rate                     p50                       p99                     p99.9  verdicts
+    2500     0.26 [0.25 to 0.26]       2.14 [2.10 to 2.59]       3.69 [3.31 to 4.16]  ok,ok,ok
+    5000     0.26 [0.26 to 0.26]       2.66 [2.61 to 2.71]       5.33 [5.22 to 5.37]  ok,ok,ok
+    7500     0.27 [0.26 to 0.27]       2.61 [1.08 to 2.63]       8.91 [3.41 to 9.35]  ok,ok,ok
+   10000     0.29 [0.28 to 0.29]       2.76 [2.50 to 2.91]    14.82 [13.67 to 15.20]  ok,ok,ok
+   12500     0.31 [0.31 to 0.32]      3.68 [3.11 to 22.67]    27.28 [15.80 to 42.69]  ok,ok,ok
+   15000     0.34 [0.33 to 0.38]    24.05 [23.49 to 33.27]    44.63 [33.32 to 45.45]  ok,ok,ok
+   17500       inf [1.79 to inf]          inf [inf to inf]          inf [inf to inf]  SATURATED,SATURATED,SATURATED
+
+  highest rate where every repeat was valid with p99 <= 10ms: 10000 req/s
+
+raw results written to docs/benchmarks/latency-basic-mix-70-20-10.json

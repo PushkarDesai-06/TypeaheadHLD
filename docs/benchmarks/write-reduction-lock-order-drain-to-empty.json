@@ -1,0 +1,858 @@
+{
+  "date": "2026-11-02T10:19:29.485Z",
+  "baseUrl": "http://172.22.0.6:8080",
+  "durationS": 60,
+  "repeats": 3,
+  "drainTimeoutMs": 60000,
+  "batchSize": 100,
+  "flushIntervalMs": 5000,
+  "note": "lock-ordered flushes (rows sorted by byte order), cache-updater claims dirty prefixes with FOR UPDATE SKIP LOCKED, decay locks in the same order; traffic sent to the LB container IP",
+  "results": [
+    {
+      "rate": 1,
+      "repeat": 1,
+      "verdict": "ok",
+      "sent": 60,
+      "accepted": 60,
+      "failed": 0,
+      "failureKinds": {},
+      "searches": 60,
+      "batches": 34,
+      "rows": 60,
+      "writeReduction": 1.7647058823529411,
+      "rowReduction": 1,
+      "modelWriteReduction": 1.8876828692779613,
+      "drain": {
+        "drained": true,
+        "ms": 4437.183589,
+        "stillBuffered": 0
+      },
+      "deadlocks": 0,
+      "nodes": [
+        {
+          "shard": "1",
+          "searches": 18,
+          "batches": 12,
+          "rows": 18,
+          "ratePerS": 0.3050441981194234,
+          "modelBatches": 10.26
+        },
+        {
+          "shard": "2",
+          "searches": 19,
+          "batches": 10,
+          "rows": 19,
+          "ratePerS": 0.32199109801494696,
+          "modelBatches": 10.31
+        },
+        {
+          "shard": "3",
+          "searches": 23,
+          "batches": 12,
+          "rows": 23,
+          "ratePerS": 0.38977869759704104,
+          "modelBatches": 11.215
+        }
+      ]
+    },
+    {
+      "rate": 1,
+      "repeat": 2,
+      "verdict": "ok",
+      "sent": 60,
+      "accepted": 60,
+      "failed": 0,
+      "failureKinds": {},
+      "searches": 60,
+      "batches": 34,
+      "rows": 60,
+      "writeReduction": 1.7647058823529411,
+      "rowReduction": 1,
+      "modelWriteReduction": 1.8805829807240244,
+      "drain": {
+        "drained": true,
+        "ms": 1008.5204930000036,
+        "stillBuffered": 0
+      },
+      "deadlocks": 0,
+      "nodes": [
+        {
+          "shard": "1",
+          "searches": 21,
+          "batches": 11,
+          "rows": 21,
+          "ratePerS": 0.3558905404786012,
+          "modelBatches": 10.9
+        },
+        {
+          "shard": "2",
+          "searches": 18,
+          "batches": 11,
+          "rows": 18,
+          "ratePerS": 0.3050490346959439,
+          "modelBatches": 10.27
+        },
+        {
+          "shard": "3",
+          "searches": 21,
+          "batches": 12,
+          "rows": 21,
+          "ratePerS": 0.3558905404786012,
+          "modelBatches": 10.735
+        }
+      ]
+    },
+    {
+      "rate": 1,
+      "repeat": 3,
+      "verdict": "ok",
+      "sent": 60,
+      "accepted": 60,
+      "failed": 0,
+      "failureKinds": {},
+      "searches": 60,
+      "batches": 34,
+      "rows": 60,
+      "writeReduction": 1.7647058823529411,
+      "rowReduction": 1,
+      "modelWriteReduction": 1.886199308393587,
+      "drain": {
+        "drained": true,
+        "ms": 807.9609880000062,
+        "stillBuffered": 0
+      },
+      "deadlocks": 0,
+      "nodes": [
+        {
+          "shard": "1",
+          "searches": 24,
+          "batches": 11,
+          "rows": 24,
+          "ratePerS": 0.40671122540793536,
+          "modelBatches": 11.545
+        },
+        {
+          "shard": "2",
+          "searches": 16,
+          "batches": 11,
+          "rows": 16,
+          "ratePerS": 0.2711408169386236,
+          "modelBatches": 9.715
+        },
+        {
+          "shard": "3",
+          "searches": 20,
+          "batches": 12,
+          "rows": 20,
+          "ratePerS": 0.33892602117327947,
+          "modelBatches": 10.55
+        }
+      ]
+    },
+    {
+      "rate": 5,
+      "repeat": 1,
+      "verdict": "ok",
+      "sent": 300,
+      "accepted": 300,
+      "failed": 0,
+      "failureKinds": {},
+      "searches": 300,
+      "batches": 37,
+      "rows": 294,
+      "writeReduction": 8.108108108108109,
+      "rowReduction": 1.0204081632653061,
+      "modelWriteReduction": 7.81657113079729,
+      "drain": {
+        "drained": true,
+        "ms": 4838.792065000016,
+        "stillBuffered": 0
+      },
+      "deadlocks": 0,
+      "nodes": [
+        {
+          "shard": "1",
+          "searches": 105,
+          "batches": 13,
+          "rows": 105,
+          "ratePerS": 1.755642367037021,
+          "modelBatches": 12.83
+        },
+        {
+          "shard": "2",
+          "searches": 78,
+          "batches": 12,
+          "rows": 78,
+          "ratePerS": 1.3041914726560726,
+          "modelBatches": 12.685
+        },
+        {
+          "shard": "3",
+          "searches": 117,
+          "batches": 12,
+          "rows": 111,
+          "ratePerS": 1.956287208984109,
+          "modelBatches": 12.865
+        }
+      ]
+    },
+    {
+      "rate": 5,
+      "repeat": 2,
+      "verdict": "ok",
+      "sent": 300,
+      "accepted": 300,
+      "failed": 0,
+      "failureKinds": {},
+      "searches": 300,
+      "batches": 40,
+      "rows": 284,
+      "writeReduction": 7.5,
+      "rowReduction": 1.056338028169014,
+      "modelWriteReduction": 7.824726134585289,
+      "drain": {
+        "drained": true,
+        "ms": 4941.127554000006,
+        "stillBuffered": 0
+      },
+      "deadlocks": 0,
+      "nodes": [
+        {
+          "shard": "1",
+          "searches": 110,
+          "batches": 15,
+          "rows": 109,
+          "ratePerS": 1.839292244758519,
+          "modelBatches": 12.81
+        },
+        {
+          "shard": "2",
+          "searches": 73,
+          "batches": 13,
+          "rows": 73,
+          "ratePerS": 1.2206212169761081,
+          "modelBatches": 12.71
+        },
+        {
+          "shard": "3",
+          "searches": 117,
+          "batches": 12,
+          "rows": 102,
+          "ratePerS": 1.9563381148795156,
+          "modelBatches": 12.82
+        }
+      ]
+    },
+    {
+      "rate": 5,
+      "repeat": 3,
+      "verdict": "ok",
+      "sent": 300,
+      "accepted": 300,
+      "failed": 0,
+      "failureKinds": {},
+      "searches": 300,
+      "batches": 37,
+      "rows": 288,
+      "writeReduction": 8.108108108108109,
+      "rowReduction": 1.0416666666666667,
+      "modelWriteReduction": 7.811482879833354,
+      "drain": {
+        "drained": true,
+        "ms": 302.53205500001786,
+        "stillBuffered": 0
+      },
+      "deadlocks": 0,
+      "nodes": [
+        {
+          "shard": "1",
+          "searches": 101,
+          "batches": 12,
+          "rows": 99,
+          "ratePerS": 1.688709920000107,
+          "modelBatches": 12.82
+        },
+        {
+          "shard": "2",
+          "searches": 81,
+          "batches": 12,
+          "rows": 81,
+          "ratePerS": 1.35431191603969,
+          "modelBatches": 12.725
+        },
+        {
+          "shard": "3",
+          "searches": 118,
+          "batches": 13,
+          "rows": 108,
+          "ratePerS": 1.9729482233664617,
+          "modelBatches": 12.86
+        }
+      ]
+    },
+    {
+      "rate": 20,
+      "repeat": 1,
+      "verdict": "ok",
+      "sent": 1200,
+      "accepted": 1200,
+      "failed": 0,
+      "failureKinds": {},
+      "searches": 1200,
+      "batches": 38,
+      "rows": 1120,
+      "writeReduction": 31.57894736842105,
+      "rowReduction": 1.0714285714285714,
+      "modelWriteReduction": 30.852294639413802,
+      "drain": {
+        "drained": true,
+        "ms": 4736.9391659999965,
+        "stillBuffered": 0
+      },
+      "deadlocks": 0,
+      "nodes": [
+        {
+          "shard": "1",
+          "searches": 408,
+          "batches": 13,
+          "rows": 392,
+          "ratePerS": 6.80507977406195,
+          "modelBatches": 12.965
+        },
+        {
+          "shard": "2",
+          "searches": 360,
+          "batches": 13,
+          "rows": 355,
+          "ratePerS": 6.004482153584073,
+          "modelBatches": 12.955
+        },
+        {
+          "shard": "3",
+          "searches": 432,
+          "batches": 12,
+          "rows": 373,
+          "ratePerS": 7.205378584300888,
+          "modelBatches": 12.975
+        }
+      ]
+    },
+    {
+      "rate": 20,
+      "repeat": 2,
+      "verdict": "ok",
+      "sent": 1200,
+      "accepted": 1200,
+      "failed": 0,
+      "failureKinds": {},
+      "searches": 1200,
+      "batches": 38,
+      "rows": 1110,
+      "writeReduction": 31.57894736842105,
+      "rowReduction": 1.0810810810810811,
+      "modelWriteReduction": 30.868167202572348,
+      "drain": {
+        "drained": true,
+        "ms": 4836.887448000023,
+        "stillBuffered": 0
+      },
+      "deadlocks": 0,
+      "nodes": [
+        {
+          "shard": "1",
+          "searches": 416,
+          "batches": 13,
+          "rows": 398,
+          "ratePerS": 6.938491558870386,
+          "modelBatches": 12.97
+        },
+        {
+          "shard": "2",
+          "searches": 327,
+          "batches": 13,
+          "rows": 326,
+          "ratePerS": 5.454054662862059,
+          "modelBatches": 12.94
+        },
+        {
+          "shard": "3",
+          "searches": 457,
+          "batches": 12,
+          "rows": 386,
+          "ratePerS": 7.622333275009054,
+          "modelBatches": 12.965
+        }
+      ]
+    },
+    {
+      "rate": 20,
+      "repeat": 3,
+      "verdict": "ok",
+      "sent": 1200,
+      "accepted": 1200,
+      "failed": 0,
+      "failureKinds": {},
+      "searches": 1200,
+      "batches": 42,
+      "rows": 1108,
+      "writeReduction": 28.571428571428573,
+      "rowReduction": 1.0830324909747293,
+      "modelWriteReduction": 30.911901081916536,
+      "drain": {
+        "drained": true,
+        "ms": 4738.34520900005,
+        "stillBuffered": 0
+      },
+      "deadlocks": 0,
+      "nodes": [
+        {
+          "shard": "1",
+          "searches": 406,
+          "batches": 13,
+          "rows": 385,
+          "ratePerS": 6.771374760539447,
+          "modelBatches": 12.95
+        },
+        {
+          "shard": "2",
+          "searches": 357,
+          "batches": 14,
+          "rows": 352,
+          "ratePerS": 5.954139875646755,
+          "modelBatches": 12.93
+        },
+        {
+          "shard": "3",
+          "searches": 437,
+          "batches": 15,
+          "rows": 371,
+          "ratePerS": 7.288400912206252,
+          "modelBatches": 12.94
+        }
+      ]
+    },
+    {
+      "rate": 60,
+      "repeat": 1,
+      "verdict": "ok",
+      "sent": 3600,
+      "accepted": 3600,
+      "failed": 0,
+      "failureKinds": {},
+      "searches": 3600,
+      "batches": 67,
+      "rows": 3235,
+      "writeReduction": 53.73134328358209,
+      "rowReduction": 1.1128284389489953,
+      "modelWriteReduction": 64.30293828704117,
+      "drain": {
+        "drained": true,
+        "ms": 4941.907585999928,
+        "stillBuffered": 0
+      },
+      "deadlocks": 0,
+      "nodes": [
+        {
+          "shard": "1",
+          "searches": 1245,
+          "batches": 23,
+          "rows": 1159,
+          "ratePerS": 20.752462821698952,
+          "modelBatches": 20.445
+        },
+        {
+          "shard": "2",
+          "searches": 1084,
+          "batches": 20,
+          "rows": 1060,
+          "ratePerS": 18.06881100298929,
+          "modelBatches": 14.11
+        },
+        {
+          "shard": "3",
+          "searches": 1271,
+          "batches": 24,
+          "rows": 1016,
+          "ratePerS": 21.185847587453306,
+          "modelBatches": 21.43
+        }
+      ]
+    },
+    {
+      "rate": 60,
+      "repeat": 2,
+      "verdict": "ok",
+      "sent": 3600,
+      "accepted": 3600,
+      "failed": 0,
+      "failureKinds": {},
+      "searches": 3600,
+      "batches": 71,
+      "rows": 3266,
+      "writeReduction": 50.70422535211268,
+      "rowReduction": 1.1022657685241886,
+      "modelWriteReduction": 65.14068578666425,
+      "drain": {
+        "drained": true,
+        "ms": 4839.143263999955,
+        "stillBuffered": 0
+      },
+      "deadlocks": 0,
+      "nodes": [
+        {
+          "shard": "1",
+          "searches": 1209,
+          "batches": 25,
+          "rows": 1116,
+          "ratePerS": 20.152775035778895,
+          "modelBatches": 18.455
+        },
+        {
+          "shard": "2",
+          "searches": 1053,
+          "batches": 17,
+          "rows": 1031,
+          "ratePerS": 17.552416966646135,
+          "modelBatches": 13.585
+        },
+        {
+          "shard": "3",
+          "searches": 1338,
+          "batches": 29,
+          "rows": 1119,
+          "ratePerS": 22.303071131407908,
+          "modelBatches": 23.225
+        }
+      ]
+    },
+    {
+      "rate": 60,
+      "repeat": 3,
+      "verdict": "ok",
+      "sent": 3600,
+      "accepted": 3600,
+      "failed": 0,
+      "failureKinds": {},
+      "searches": 3600,
+      "batches": 68,
+      "rows": 3241,
+      "writeReduction": 52.94117647058823,
+      "rowReduction": 1.1107682813946314,
+      "modelWriteReduction": 63.41936052144808,
+      "drain": {
+        "drained": true,
+        "ms": 4937.286492999992,
+        "stillBuffered": 0
+      },
+      "deadlocks": 0,
+      "nodes": [
+        {
+          "shard": "1",
+          "searches": 1241,
+          "batches": 24,
+          "rows": 1154,
+          "ratePerS": 20.686217924370894,
+          "modelBatches": 19.915
+        },
+        {
+          "shard": "2",
+          "searches": 993,
+          "batches": 17,
+          "rows": 966,
+          "ratePerS": 16.552308137711762,
+          "modelBatches": 13.115
+        },
+        {
+          "shard": "3",
+          "searches": 1366,
+          "batches": 27,
+          "rows": 1121,
+          "ratePerS": 22.7698418087757,
+          "modelBatches": 23.735
+        }
+      ]
+    },
+    {
+      "rate": 300,
+      "repeat": 1,
+      "verdict": "ok",
+      "sent": 18000,
+      "accepted": 18000,
+      "failed": 0,
+      "failureKinds": {},
+      "searches": 18000,
+      "batches": 426,
+      "rows": 16260,
+      "writeReduction": 42.25352112676056,
+      "rowReduction": 1.1070110701107012,
+      "modelWriteReduction": 88.73770613029652,
+      "drain": {
+        "drained": true,
+        "ms": 4847.629176000017,
+        "stillBuffered": 0
+      },
+      "deadlocks": 0,
+      "nodes": [
+        {
+          "shard": "1",
+          "searches": 6289,
+          "batches": 144,
+          "rows": 5864,
+          "ratePerS": 104.81496026339131,
+          "modelBatches": 70.965
+        },
+        {
+          "shard": "2",
+          "searches": 5093,
+          "batches": 123,
+          "rows": 4968,
+          "ratePerS": 84.88195144243154,
+          "modelBatches": 59.27
+        },
+        {
+          "shard": "3",
+          "searches": 6618,
+          "batches": 159,
+          "rows": 5428,
+          "ratePerS": 110.29820432868877,
+          "modelBatches": 72.61
+        }
+      ]
+    },
+    {
+      "rate": 300,
+      "repeat": 2,
+      "verdict": "ok",
+      "sent": 18000,
+      "accepted": 18000,
+      "failed": 0,
+      "failureKinds": {},
+      "searches": 18000,
+      "batches": 420,
+      "rows": 16263,
+      "writeReduction": 42.857142857142854,
+      "rowReduction": 1.1068068622025458,
+      "modelWriteReduction": 88.45643520566121,
+      "drain": {
+        "drained": true,
+        "ms": 4738.9231290000025,
+        "stillBuffered": 0
+      },
+      "deadlocks": 0,
+      "nodes": [
+        {
+          "shard": "1",
+          "searches": 6311,
+          "batches": 152,
+          "rows": 5881,
+          "ratePerS": 105.18266163159704,
+          "modelBatches": 71.36
+        },
+        {
+          "shard": "2",
+          "searches": 5109,
+          "batches": 118,
+          "rows": 4982,
+          "ratePerS": 85.14945623131506,
+          "modelBatches": 59.63
+        },
+        {
+          "shard": "3",
+          "searches": 6580,
+          "batches": 150,
+          "rows": 5400,
+          "ratePerS": 109.66596633432238,
+          "modelBatches": 72.5
+        }
+      ]
+    },
+    {
+      "rate": 300,
+      "repeat": 3,
+      "verdict": "ok",
+      "sent": 18000,
+      "accepted": 18000,
+      "failed": 0,
+      "failureKinds": {},
+      "searches": 18000,
+      "batches": 425,
+      "rows": 16294,
+      "writeReduction": 42.35294117647059,
+      "rowReduction": 1.1047011169755738,
+      "modelWriteReduction": 88.4542617754736,
+      "drain": {
+        "drained": true,
+        "ms": 4638.032883999986,
+        "stillBuffered": 0
+      },
+      "deadlocks": 0,
+      "nodes": [
+        {
+          "shard": "1",
+          "searches": 6330,
+          "batches": 149,
+          "rows": 5874,
+          "ratePerS": 105.49995863522462,
+          "modelBatches": 71.565
+        },
+        {
+          "shard": "2",
+          "searches": 5134,
+          "batches": 124,
+          "rows": 5009,
+          "ratePerS": 85.56663311741598,
+          "modelBatches": 59.585
+        },
+        {
+          "shard": "3",
+          "searches": 6536,
+          "batches": 152,
+          "rows": 5411,
+          "ratePerS": 108.93329062240569,
+          "modelBatches": 72.345
+        }
+      ]
+    },
+    {
+      "rate": 1500,
+      "repeat": 1,
+      "verdict": "ok",
+      "sent": 90000,
+      "accepted": 90000,
+      "failed": 0,
+      "failureKinds": {},
+      "searches": 90000,
+      "batches": 3318,
+      "rows": 81899,
+      "writeReduction": 27.124773960217,
+      "rowReduction": 1.098914516660765,
+      "modelWriteReduction": 97.89046057461701,
+      "drain": {
+        "drained": true,
+        "ms": 4647.699335000012,
+        "stillBuffered": 0
+      },
+      "deadlocks": 0,
+      "nodes": [
+        {
+          "shard": "1",
+          "searches": 31443,
+          "batches": 1231,
+          "rows": 29461,
+          "ratePerS": 524.0551315391142,
+          "modelBatches": 320.88
+        },
+        {
+          "shard": "2",
+          "searches": 25523,
+          "batches": 864,
+          "rows": 24926,
+          "ratePerS": 425.38749872063136,
+          "modelBatches": 261.68
+        },
+        {
+          "shard": "3",
+          "searches": 33034,
+          "batches": 1223,
+          "rows": 27512,
+          "ratePerS": 550.5720578590815,
+          "modelBatches": 336.835
+        }
+      ]
+    },
+    {
+      "rate": 1500,
+      "repeat": 2,
+      "verdict": "ok",
+      "sent": 90000,
+      "accepted": 90000,
+      "failed": 0,
+      "failureKinds": {},
+      "searches": 90000,
+      "batches": 3233,
+      "rows": 81939,
+      "writeReduction": 27.837921435199505,
+      "rowReduction": 1.098378061728847,
+      "modelWriteReduction": 97.87821774640841,
+      "drain": {
+        "drained": true,
+        "ms": 4447.964473000029,
+        "stillBuffered": 0
+      },
+      "deadlocks": 0,
+      "nodes": [
+        {
+          "shard": "1",
+          "searches": 31502,
+          "batches": 1166,
+          "rows": 29444,
+          "ratePerS": 525.0390926096499,
+          "modelBatches": 321.575
+        },
+        {
+          "shard": "2",
+          "searches": 25798,
+          "batches": 883,
+          "rows": 25208,
+          "ratePerS": 429.9713831230953,
+          "modelBatches": 264.35
+        },
+        {
+          "shard": "3",
+          "searches": 32700,
+          "batches": 1184,
+          "rows": 27287,
+          "ratePerS": 545.0059782977446,
+          "modelBatches": 333.585
+        }
+      ]
+    },
+    {
+      "rate": 1500,
+      "repeat": 3,
+      "verdict": "ok",
+      "sent": 90000,
+      "accepted": 90000,
+      "failed": 0,
+      "failureKinds": {},
+      "searches": 90000,
+      "batches": 3361,
+      "rows": 81831,
+      "writeReduction": 26.77774471883368,
+      "rowReduction": 1.0998276936613265,
+      "modelWriteReduction": 97.8723635632065,
+      "drain": {
+        "drained": true,
+        "ms": 4541.755351,
+        "stillBuffered": 0
+      },
+      "deadlocks": 0,
+      "nodes": [
+        {
+          "shard": "1",
+          "searches": 31282,
+          "batches": 1186,
+          "rows": 29218,
+          "ratePerS": 521.3719020139329,
+          "modelBatches": 319.395
+        },
+        {
+          "shard": "2",
+          "searches": 25564,
+          "batches": 917,
+          "rows": 24942,
+          "ratePerS": 426.07094505096154,
+          "modelBatches": 262.25
+        },
+        {
+          "shard": "3",
+          "searches": 33154,
+          "batches": 1258,
+          "rows": 27671,
+          "ratePerS": 552.572215311359,
+          "modelBatches": 337.92
+        }
+      ]
+    }
+  ]
+}

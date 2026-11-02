@@ -1,12 +1,13 @@
 /**
- * Benchmark harness (Assignment §10 Non-Functional + §8 batch-write evidence).
+ * Benchmark harness (Assignment §10 Non-Functional).
  *
  * Drives a RUNNING cluster through the Load Balancer and reports:
  *   • /suggest latency      : p50 / p90 / p95 / p99 / max over many requests
  *   • cache hit rate        : per traffic category, on a mix of seeded prefixes,
  *                             typos and novel strings (not just seeded prefixes,
  *                             which are 100% hits by construction)
- *   • write reduction       : searches accepted per Postgres batch (from /metrics)
+ *
+ * Write reduction from batching has its own fixed-rate sweep in bench-writes.ts.
  *
  * It only uses the public HTTP API, so the numbers reflect the real proxy +
  * shard + Redis path. Pure measurement — no internal hooks.
@@ -17,107 +18,27 @@
  *   BENCH_MIX=70,20,10 bun run scripts/bench.ts   # % seeded, typo, novel
  */
 
-import { normalize, prefixesOf } from "../src/config";
+import { normalize } from "../src/config";
+import {
+  CATEGORIES,
+  type Category,
+  type Workload,
+  loadWorkload,
+  mixLabel,
+  novelPrefix,
+  parseMix,
+  percentile,
+  pickCategory,
+  prefixFor,
+} from "./lib/workload";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:8080";
 const N_SUGGEST = Number(process.env.BENCH_SUGGEST ?? 3000);
-const N_SEARCH = Number(process.env.BENCH_SEARCH ?? 1000);
 const CONCURRENCY = Number(process.env.BENCH_CONCURRENCY ?? 32);
 const RANK = process.env.BENCH_RANK ?? "basic"; // basic | recency
 const DATA_PATH = process.env.DATA_PATH ?? "data/search_frequencies.json";
 
-const CATEGORIES = ["seeded", "typo", "novel"] as const;
-type Category = (typeof CATEGORIES)[number];
-
-const MIX_WEIGHTS = (process.env.BENCH_MIX ?? "70,20,10").split(",").map(Number);
-if (MIX_WEIGHTS.length !== 3 || MIX_WEIGHTS.some((w) => !(w >= 0))) {
-  throw new Error(`BENCH_MIX must be three non-negative numbers (seeded,typo,novel), got "${process.env.BENCH_MIX}"`);
-}
-
-interface Entry {
-  query: string;
-  count: number;
-}
-
-interface Workload {
-  /** 2–4 char prefixes of dataset queries: every one is pre-cached by the seeder. */
-  seeded: string[];
-  /** Normalised dataset queries, used as the source text for typos. */
-  queries: string[];
-  /** Every prefix the seeder caches, to tell a typo that is still a real prefix from one that is not. */
-  knownPrefixes: Set<string>;
-}
-
-async function loadWorkload(): Promise<Workload> {
-  const entries: Entry[] = JSON.parse(await Bun.file(DATA_PATH).text());
-  const queries = entries.map((e) => normalize(e.query)).filter((q) => /[a-z0-9]/i.test(q));
-
-  const knownPrefixes = new Set<string>();
-  for (const q of queries) for (const p of prefixesOf(q)) knownPrefixes.add(p);
-
-  const seeded = new Set<string>();
-  for (const q of queries) {
-    if (q.length < 2) continue;
-    const len = 2 + (q.length % 3); // 2..4
-    seeded.add(q.slice(0, Math.min(len, q.length)));
-    if (seeded.size >= 20000) break;
-  }
-  return { seeded: [...seeded], queries: queries.filter((q) => /^[a-z]{4,}/.test(q)), knownPrefixes };
-}
-
-const LETTERS = "abcdefghijklmnopqrstuvwxyz";
-const randInt = (n: number) => Math.floor(Math.random() * n);
-const randLetter = () => LETTERS[randInt(LETTERS.length)]!;
-const pick = <T>(xs: readonly T[]) => xs[randInt(xs.length)]!;
-
-/**
- * A 3–8 char prefix of a real query with one edit (substitute, delete, insert,
- * or swap two adjacent letters) after the first character, the way people
- * mistype while autocomplete is open.
- */
-function typoPrefix(w: Workload): string {
-  while (true) {
-    const q = pick(w.queries);
-    const len = 3 + randInt(Math.min(6, q.length - 2));
-    const chars = q.slice(0, len).split("");
-    const pos = 1 + randInt(chars.length - 1);
-    switch (randInt(4)) {
-      case 0: chars[pos] = randLetter(); break;
-      case 1: chars.splice(pos, 1); break;
-      case 2: chars.splice(pos, 0, randLetter()); break;
-      case 3:
-        if (pos === chars.length - 1) continue;
-        [chars[pos], chars[pos + 1]] = [chars[pos + 1]!, chars[pos]!];
-        break;
-    }
-    const typo = chars.join("");
-    if (typo !== q.slice(0, len) && normalize(typo)) return typo;
-  }
-}
-
-/** A random 4–8 letter string that is not a prefix of any dataset query. */
-function novelPrefix(w: Workload): string {
-  while (true) {
-    const s = Array.from({ length: 4 + randInt(5) }, randLetter).join("");
-    if (!w.knownPrefixes.has(s)) return s;
-  }
-}
-
-function pickCategory(): Category {
-  const total = MIX_WEIGHTS.reduce((a, b) => a + b, 0);
-  let r = Math.random() * total;
-  for (let i = 0; i < CATEGORIES.length; i++) {
-    r -= MIX_WEIGHTS[i]!;
-    if (r < 0) return CATEGORIES[i]!;
-  }
-  return "seeded";
-}
-
-function prefixFor(category: Category, w: Workload): string {
-  if (category === "typo") return typoPrefix(w);
-  if (category === "novel") return novelPrefix(w);
-  return pick(w.seeded);
-}
+const MIX_WEIGHTS = parseMix(process.env.BENCH_MIX);
 
 /** Run `total` async tasks with at most `concurrency` in flight. */
 async function pooled<T>(total: number, concurrency: number, task: (i: number) => Promise<T>) {
@@ -130,12 +51,6 @@ async function pooled<T>(total: number, concurrency: number, task: (i: number) =
     }
   });
   await Promise.all(workers);
-}
-
-function percentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) return 0;
-  const idx = Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1);
-  return sorted[Math.max(0, idx)]!;
 }
 
 const ms = (n: number) => `${n.toFixed(2)}ms`;
@@ -181,8 +96,7 @@ function printCategoryRow(label: string, s: CategoryStats) {
 }
 
 async function benchSuggest(w: Workload) {
-  const mixLabel = CATEGORIES.map((c, i) => `${c} ${MIX_WEIGHTS[i]}`).join(" / ");
-  console.log(`\n▶ /suggest mixed workload  (rank=${RANK}, n=${N_SUGGEST}, concurrency=${CONCURRENCY}, mix ${mixLabel})`);
+  console.log(`\n▶ /suggest mixed workload  (rank=${RANK}, n=${N_SUGGEST}, concurrency=${CONCURRENCY}, mix ${mixLabel(MIX_WEIGHTS)})`);
 
   // Warm-up so JIT + connections are hot and we measure steady state.
   await pooled(Math.min(200, N_SUGGEST), CONCURRENCY, async (i) => {
@@ -193,7 +107,7 @@ async function benchSuggest(w: Workload) {
 
   const t0 = performance.now();
   await pooled(N_SUGGEST, CONCURRENCY, async () => {
-    const category = pickCategory();
+    const category = pickCategory(MIX_WEIGHTS);
     const prefix = prefixFor(category, w);
     const s = stats[category];
     if (w.knownPrefixes.has(normalize(prefix))) s.realPrefix++;
@@ -254,41 +168,6 @@ async function benchRepeatMiss(w: Workload) {
   console.log(`  second request still went to Postgres: ${stillMiss} / ${samples}`);
 }
 
-async function benchWriteReduction(pool: readonly string[]) {
-  console.log(`\n▶ write reduction  (n=${N_SEARCH} searches)`);
-  const before = await getMetrics();
-
-  // Submit N searches; reuse a small set of queries so dedup also shows in logs.
-  const queries = pool.slice(0, 50).map((p) => `${p} demo`);
-  await pooled(N_SEARCH, CONCURRENCY, async (i) => {
-    const q = queries[i % queries.length]!;
-    await fetch(`${BASE}/search`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ query: q }),
-    });
-  });
-
-  // Let the buffers flush (poll until drained, bounded wait).
-  for (let i = 0; i < 40; i++) {
-    const m = await getMetrics();
-    if ((m.total?.buffered ?? 0) === 0) break;
-    await Bun.sleep(250);
-  }
-  const after = await getMetrics();
-
-  const dSearches = (after.total.searchesReceived ?? 0) - (before.total.searchesReceived ?? 0);
-  const dBatches = (after.total.batchesFlushed ?? 0) - (before.total.batchesFlushed ?? 0);
-  const dRows = (after.total.rowsUpserted ?? 0) - (before.total.rowsUpserted ?? 0);
-  console.log(`  searches submitted     : ${dSearches}`);
-  console.log(`  Postgres batch txns    : ${dBatches}`);
-  console.log(`  unique rows upserted   : ${dRows}`);
-  console.log(
-    `  write reduction        : ${dBatches > 0 ? (dSearches / dBatches).toFixed(1) : "n/a"}× ` +
-      `(searches per DB transaction)`,
-  );
-}
-
 async function main() {
   console.log(`# Typeahead benchmark against ${BASE}`);
   try {
@@ -298,18 +177,15 @@ async function main() {
     process.exit(1);
   }
 
-  const workload = await loadWorkload();
+  const workload = await loadWorkload(DATA_PATH);
   console.log(`Seeded prefix pool: ${workload.seeded.length} distinct prefixes (${workload.knownPrefixes.size} cached prefixes in total)`);
 
   await benchSuggest(workload);
   await benchRepeatMiss(workload);
-  await benchWriteReduction(workload.seeded);
 
   const m = await getMetrics();
   console.log(`\n▶ cluster /metrics (cumulative)`);
   console.log(`  cache hit rate  : ${m.total.cacheHitRate != null ? (m.total.cacheHitRate * 100).toFixed(1) + "%" : "n/a"}`);
-  console.log(`  write reduction : ${m.total.writeReduction != null ? m.total.writeReduction.toFixed(1) + "×" : "n/a"}`);
-  console.log(`  searches=${m.total.searchesReceived} batches=${m.total.batchesFlushed} rows=${m.total.rowsUpserted}`);
   console.log(`  hits=${m.total.cacheHits} misses=${m.total.cacheMisses}`);
 }
 
