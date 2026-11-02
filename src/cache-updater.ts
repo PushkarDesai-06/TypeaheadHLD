@@ -62,12 +62,15 @@ async function pushToShard(shard: ShardId, updates: PrefixUpdate[]): Promise<voi
  * already gone), so it is reprocessed next cycle. Rebuilds read the source of
  * truth, so a redundant rebuild is harmless (idempotent). If an app node POST
  * fails, that shard's prefixes are re-marked dirty so they retry later.
+ * SKIP LOCKED leaves prefixes that an in-flight app flush is still writing for
+ * the next cycle, so the updater never waits on (or deadlocks with) a flush.
  */
 async function runCycle(): Promise<number> {
   const claimed = (await db`
     DELETE FROM dirty_prefixes
     WHERE prefix IN (
       SELECT prefix FROM dirty_prefixes ORDER BY dirty_at ASC LIMIT ${DIRTY_BATCH}
+      FOR UPDATE SKIP LOCKED
     )
     RETURNING prefix
   `) as { prefix: string }[];

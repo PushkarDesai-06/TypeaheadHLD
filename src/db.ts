@@ -81,6 +81,20 @@ export function escapeLike(prefix: string): string {
 }
 
 /**
+ * Sort keys into byte order, the same order as Postgres `COLLATE "C"`. Every
+ * statement that locks many `query_counts` or `dirty_prefixes` rows takes them
+ * in this order, so two concurrent writers can never each hold a row the other
+ * is waiting for (the deadlock that hit concurrent batch flushes from
+ * different app nodes, which share popular prefixes like "g" and "go").
+ */
+export function inLockOrder(keys: Iterable<string>): string[] {
+  return [...keys]
+    .map((key) => ({ key, bytes: Buffer.from(key) }))
+    .sort((a, b) => Buffer.compare(a.bytes, b.bytes))
+    .map(({ key }) => key);
+}
+
+/**
  * Write path (app nodes), in ONE transaction so a dirty mark is never visible
  * to the updater without its count already committed:
  *   1. accumulate per-query deltas (UPSERT add),
@@ -95,8 +109,11 @@ export async function recordCountsAndDirty(
   // recent_count is seeded with the same delta as count so a brand-new query is
   // immediately "recent"; on conflict both grow by the delta. recent_count is
   // later decayed (see decayRecentCounts) while count is permanent.
-  const countRows = [...counts].map(([query, count]) => ({ query, count, recent_count: count }));
-  const prefixRows = [...prefixes].map((prefix) => ({ prefix }));
+  const countRows = inLockOrder(counts.keys()).map((query) => {
+    const count = counts.get(query)!;
+    return { query, count, recent_count: count };
+  });
+  const prefixRows = inLockOrder(prefixes).map((prefix) => ({ prefix }));
 
   await db.begin(async (tx) => {
     await tx`
@@ -114,17 +131,22 @@ export async function recordCountsAndDirty(
   });
 }
 
+/** Postgres caps a statement at 65,535 parameters; one prefix is one parameter. */
+const MARK_DIRTY_ROWS_PER_STATEMENT = 10_000;
+
 /**
  * Re-mark prefixes dirty (no count change). Used by the cache-updater to requeue
  * a batch whose shard write failed, so it is retried on a later cycle.
  */
 export async function markDirty(prefixes: string[], client: SQL = db): Promise<void> {
-  if (prefixes.length === 0) return;
-  const rows = prefixes.map((prefix) => ({ prefix }));
-  await client`
-    INSERT INTO dirty_prefixes ${client(rows, "prefix")}
-    ON CONFLICT (prefix) DO UPDATE SET dirty_at = now()
-  `;
+  const ordered = inLockOrder(new Set(prefixes));
+  for (let i = 0; i < ordered.length; i += MARK_DIRTY_ROWS_PER_STATEMENT) {
+    const rows = ordered.slice(i, i + MARK_DIRTY_ROWS_PER_STATEMENT).map((prefix) => ({ prefix }));
+    await client`
+      INSERT INTO dirty_prefixes ${client(rows, "prefix")}
+      ON CONFLICT (prefix) DO UPDATE SET dirty_at = now()
+    `;
+  }
 }
 
 /**
@@ -182,10 +204,17 @@ export async function decayRecentCounts(
   client: SQL = db,
 ): Promise<string[]> {
   const rows = (await client.unsafe(
-    `UPDATE query_counts
-        SET recent_count = floor(recent_count * $1)
-      WHERE recent_count > 0
-      RETURNING query`,
+    `WITH locked AS MATERIALIZED (
+       SELECT query FROM query_counts
+        WHERE recent_count > 0
+        ORDER BY query COLLATE "C"
+        FOR UPDATE
+     )
+     UPDATE query_counts q
+        SET recent_count = floor(q.recent_count * $1)
+       FROM locked
+      WHERE q.query = locked.query
+      RETURNING q.query`,
     [factor],
   )) as { query: string }[];
   return rows.map((r) => r.query);

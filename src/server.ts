@@ -67,6 +67,7 @@ const redis = new RedisClient(REDIS_URL);
 const buffer: string[] = [];
 /** The in-progress drain, if any. Ensures only one drain runs at a time. */
 let draining: Promise<void> | null = null;
+let partialFlushRequested = false;
 
 /**
  * In-memory observability counters, exposed at `GET /metrics` and aggregated by
@@ -131,10 +132,16 @@ async function writeChunk(batch: string[]): Promise<void> {
   );
 }
 
-/** Drain the whole buffer in BATCH_SIZE chunks, newest-arriving items included. */
+/**
+ * Write full BATCH_SIZE chunks while there are any. A final partial chunk is
+ * written only when the timer or shutdown asked for one: searches that arrive
+ * while a chunk is committing wait to fill the next batch, instead of being
+ * written as a trail of tiny transactions.
+ */
 async function drain(): Promise<void> {
-  while (buffer.length > 0) {
+  while (buffer.length >= BATCH_SIZE || (partialFlushRequested && buffer.length > 0)) {
     const batch = buffer.splice(0, BATCH_SIZE);
+    if (batch.length < BATCH_SIZE) partialFlushRequested = false;
     try {
       await writeChunk(batch);
     } catch (err) {
@@ -143,17 +150,19 @@ async function drain(): Promise<void> {
       return;
     }
   }
+  if (buffer.length === 0) partialFlushRequested = false;
 }
 
 /** Start a drain if one isn't already running; returns the active drain. */
-function scheduleFlush(): Promise<void> {
+function scheduleFlush({ includePartial }: { includePartial: boolean }): Promise<void> {
+  if (includePartial) partialFlushRequested = true;
   if (!draining) draining = drain().finally(() => (draining = null));
   return draining;
 }
 
 // Safety-net flush so a partial buffer is never stranded on low traffic.
 setInterval(() => {
-  if (buffer.length > 0) void scheduleFlush();
+  if (buffer.length > 0) void scheduleFlush({ includePartial: true });
 }, FLUSH_INTERVAL_MS);
 
 // ---------------------------------------------------------------------------
@@ -345,7 +354,7 @@ const server = Bun.serve({
 
       metrics.searchesReceived++;
       const buffered = buffer.push(query); // push returns the new length
-      if (buffered >= BATCH_SIZE) void scheduleFlush(); // primary trigger (Step 4)
+      if (buffered >= BATCH_SIZE) void scheduleFlush({ includePartial: false }); // primary trigger (Step 4)
 
       return json({ message: "Searched", query, buffered }, 202);
     }
@@ -454,7 +463,7 @@ const shutdown = async () => {
   console.log(`[app${SHARD_ID}] shutting down, flushing buffer ...`);
   server.stop(); // stop accepting new requests first
   if (draining) await draining; // wait for any in-flight drain to finish
-  await scheduleFlush(); // then drain whatever remains
+  await scheduleFlush({ includePartial: true }); // then drain whatever remains
   redis.close();
   await db.close({ timeout: 5 });
   process.exit(0);
