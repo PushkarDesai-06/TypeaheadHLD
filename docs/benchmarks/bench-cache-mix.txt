@@ -1,0 +1,35 @@
+$ bun run scripts/bench.ts
+# Typeahead benchmark against http://localhost:8080
+Seeded prefix pool: 12502 distinct prefixes (932700 cached prefixes in total)
+
+▶ /suggest mixed workload  (rank=basic, n=20000, concurrency=32, mix seeded 70 / typo 20 / novel 10)
+  category   reqs     hit   empty       p50       p95       p99  errors
+  seeded    14057  100.0%    0.0%    0.73ms    1.95ms    4.21ms       0
+  typo       3998   21.0%   79.0%    0.96ms    2.61ms    5.57ms       0
+  novel      1945    0.0%  100.0%    1.02ms    2.59ms    6.16ms       0
+  overall   20000   74.5%   25.5%    0.80ms    2.17ms    4.55ms       0
+  typos that were still a real dataset prefix: 839 / 3998 (21.0%)
+  throughput : 31086 req/s (wall 643.38ms)
+  mean       : 1.02ms
+  p90        : 1.66ms
+  max        : 20.33ms
+
+▶ repeat-miss check  (same novel prefix requested twice)
+  eiwyo      db -> db
+  labq       db -> db
+  fuvo       db -> db
+  bfgtuvdx   db -> db
+  odpv       db -> db
+  second request still went to Postgres: 5 / 5
+
+▶ write reduction  (n=1000 searches)
+  searches submitted     : 1000
+  Postgres batch txns    : 12
+  unique rows upserted   : 210
+  write reduction        : 83.3× (searches per DB transaction)
+
+▶ cluster /metrics (cumulative)
+  cache hit rate  : 74.7%
+  write reduction : 83.3×
+  searches=1000 batches=12 rows=210
+  hits=15097 misses=5114
